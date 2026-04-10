@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "dockerfilePath": "./Dockerfile",
+  "buildArguments": {
+    "CACHE_BUST": "latest"
+  },
+  "expose": {
+    "api": {
+      "containerPort": 4007,
+      "httpPort": 80,
+      "httpsPort": 443
+    }
+  },
+  "healthcheck": {
+    "path": "/health",
+    "port": 4007,
+    "interval": 30,
+    "timeout": 10,
+    "retries": 3,
+    "startPeriod": 30
+  },
+  "appName": "extrahand-main-admin-service",
+  "hasPersistentData": false,
+  "description": "ExtraHand Main Admin Service - auth, user/task/support/admin operations",
+  "instanceCount": 1,
+  "tags": ["nodejs", "typescript", "express", "mongodb", "api", "extrahand", "main-admin-service"],
+  "envVars": {
+    "NODE_ENV": "production",
+    "PORT": "4007",
+    "LOG_LEVEL": "info",
+    "MONGODB_URI": "YOUR_MONGODB_URI_HERE",
+    "MONGODB_DB": "extrahand",
+    "JWT_SECRET": "YOUR_JWT_SECRET_HERE",
+    "JWT_REFRESH_SECRET": "YOUR_JWT_REFRESH_SECRET_HERE",
+    "JWT_ACCESS_EXPIRY": "15m",
+    "JWT_REFRESH_EXPIRY": "7d",
+    "ADMIN_DASHBOARD_URL": "http://localhost:3000",
+    "MAIN_ADMIN_DASHBOARD_URL": "http://localhost:3001",
+    "SUPER_ADMIN_DASHBOARD_URL": "http://localhost:3002",
+    "USER_SERVICE_URL": "http://srv-captain--extrahand-user-service:4001",
+    "TASK_SERVICE_URL": "http://srv-captain--extrahand-task-service:4002",
+    "SUPPORT_SERVICE_URL": "http://srv-captain--extrahand-platform-support-service:5002",
+    "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE"
+  },
+  "volumes": [
+    {
+      "name": "app-logs",
+      "path": "/app/logs"
+    }
+  ],
+  "restart": {
+    "policy": "unless-stopped",
+    "maximumRetryCount": 10
+  },
+  "resources": {
+    "memory": "512Mi",
+    "cpu": "0.5"
+  },
+  "networking": {
+    "publishAllPorts": false,
+    "enableTcpProxy": false
+  }
+}
