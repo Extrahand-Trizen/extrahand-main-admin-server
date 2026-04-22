@@ -4,6 +4,7 @@ import logger from '../config/logger';
 
 export class TaskServiceClient {
   private client: AxiosInstance;
+  private readonly serviceUserId = 'main-admin-service';
   
   constructor() {
     this.client = axios.create({
@@ -18,6 +19,10 @@ export class TaskServiceClient {
     
     this.client.interceptors.request.use(
       (config) => {
+        config.headers = config.headers || {};
+        if (!config.headers['X-User-Id']) {
+          config.headers['X-User-Id'] = this.serviceUserId;
+        }
         logger.debug(`Task Service Request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
       },
@@ -58,6 +63,7 @@ export class TaskServiceClient {
     status?: string;
     category?: string;
     posterId?: string;
+    assigneeId?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<any> {
@@ -92,6 +98,69 @@ export class TaskServiceClient {
     status?: string;
   }): Promise<any> {
     const response = await this.client.get(`/api/v1/tasks/${taskId}/applications`, { params });
+    return response.data;
+  }
+
+  /**
+   * List applications with filters
+   */
+  async listApplications(params: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    taskId?: string;
+    mine?: boolean;
+  }, profileId?: string): Promise<any> {
+    const response = await this.client.get('/api/v1/applications', {
+      params,
+      headers: profileId ? { 'X-Profile-Id': profileId } : undefined,
+    });
+    return response.data;
+  }
+
+  async getPosterAnalytics(requesterId: string, range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get(`/api/v1/analytics/posters/${requesterId}`, {
+      params: { range },
+    });
+    return response.data;
+  }
+
+  async getPosterSummary(range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get('/api/v1/analytics/posters/summary', {
+      params: { range },
+    });
+    return response.data;
+  }
+
+  async getTaskCategoryBreakdown(range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get('/api/v1/analytics/categories/breakdown', {
+      params: { range },
+    });
+    return response.data;
+  }
+
+  async getTaskCategoryPerformance(range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get('/api/v1/analytics/categories/performance', {
+      params: { range },
+    });
+    return response.data;
+  }
+
+  async getTaskCancellationAnalytics(range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get('/api/v1/analytics/tasks/cancellations', {
+      params: { range },
+    });
+    return response.data;
+  }
+
+  async getUserAnalytics(
+    profileId: string,
+    uid: string,
+    range: '7d' | '30d' | '90d' = '30d'
+  ): Promise<any> {
+    const response = await this.client.get(`/api/v1/analytics/users/${profileId}`, {
+      params: { uid, range },
+    });
     return response.data;
   }
   

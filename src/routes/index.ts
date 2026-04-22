@@ -6,6 +6,7 @@ import taskRoutes from './tasks';
 import inviteRoutes from './invites';
 import supportRoutes from './support';
 import analyticsRoutes from './analytics';
+import applicationRoutes from './applications';
 
 const router = Router();
 
@@ -17,6 +18,7 @@ router.use(`${API_PREFIX}/auth`, authRoutes);
 router.use(`${API_PREFIX}/admin`, adminRoutes);
 router.use(`${API_PREFIX}/users`, userRoutes);
 router.use(`${API_PREFIX}/tasks`, taskRoutes);
+router.use(`${API_PREFIX}/applications`, applicationRoutes);
 router.use(`${API_PREFIX}/invites`, inviteRoutes);
 router.use(`${API_PREFIX}/support`, supportRoutes);
 router.use(`${API_PREFIX}/analytics`, analyticsRoutes);

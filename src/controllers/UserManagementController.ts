@@ -17,6 +17,12 @@ export class UserManagementController {
         search: req.query.search as string,
         status: req.query.status as string,
         role: req.query.role as string,
+        isAadhaarVerified:
+          typeof req.query.isAadhaarVerified === 'string'
+            ? req.query.isAadhaarVerified === 'true'
+            : undefined,
+        createdFrom: req.query.createdFrom as string,
+        createdTo: req.query.createdTo as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };

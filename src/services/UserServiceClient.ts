@@ -61,6 +61,9 @@ export class UserServiceClient {
     search?: string;
     status?: string;
     role?: string;
+    isAadhaarVerified?: boolean;
+    createdFrom?: string;
+    createdTo?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<any> {
@@ -73,6 +76,22 @@ export class UserServiceClient {
    */
   async getRoleCounts(): Promise<any> {
     const response = await this.client.get('/api/v1/users/stats/roles');
+    return response.data;
+  }
+
+  /**
+   * Get count of taskers with Aadhaar verified.
+   */
+  async getTaskerAadhaarVerifiedCount(): Promise<any> {
+    const response = await this.client.get('/api/v1/profiles/internal/stats/taskers/aadhaar-verified');
+    return response.data;
+  }
+
+  /**
+   * Get multiple profiles by ObjectId for enrichment
+   */
+  async getProfilesBatch(profileIds: string[]): Promise<any> {
+    const response = await this.client.post('/api/v1/profiles/batch', { profileIds });
     return response.data;
   }
   

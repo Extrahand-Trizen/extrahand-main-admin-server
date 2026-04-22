@@ -4,6 +4,15 @@ import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 
+function getClientSafeStatus(error: any): number {
+  const upstreamStatus = Number(error?.response?.status || 0);
+  // Prevent downstream service-auth 401 from forcing admin logout in web client.
+  if (upstreamStatus === 401) {
+    return 502;
+  }
+  return upstreamStatus || 500;
+}
+
 export class TaskManagementController {
   /**
    * GET /api/v1/tasks
@@ -18,6 +27,7 @@ export class TaskManagementController {
         status: req.query.status as string,
         category: req.query.category as string,
         posterId: req.query.posterId as string,
+        assigneeId: req.query.assigneeId as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
@@ -30,9 +40,40 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('List tasks error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list tasks',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/applications
+   * List applications (optionally scoped to a profile via X-Profile-Id)
+   */
+  static async listApplications(req: Request, res: Response): Promise<void> {
+    try {
+      const params = {
+        page: req.query.page ? Number(req.query.page) : undefined,
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+        status: req.query.status as string,
+        taskId: req.query.taskId as string,
+        mine: req.query.mine === 'true',
+      };
+      const profileId = req.query.profileId as string | undefined;
+
+      const result = await taskServiceClient.listApplications(params, profileId);
+
+      res.json({
+        success: true,
+        data: result.data || result,
+        pagination: result.pagination,
+      });
+    } catch (error: any) {
+      logger.error('List applications error:', error);
+      res.status(error.response?.status || 500).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to list applications',
       });
     }
   }
@@ -53,7 +94,7 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('Get task error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get task',
       });
@@ -84,7 +125,7 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('Update task error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update task',
       });
@@ -124,7 +165,7 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('Delete task error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to delete task',
       });
@@ -153,7 +194,7 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('Get task applications error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get task applications',
       });
@@ -197,7 +238,7 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('Update application status error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update application status',
       });
