@@ -13,6 +13,53 @@ function getClientSafeStatus(error: any): number {
   return upstreamStatus || 500;
 }
 
+type UpstreamPagination = {
+  page?: number;
+  limit?: number;
+  total?: number;
+  totalPages?: number;
+  pages?: number;
+};
+
+function extractPagination(payload: any): { page: number; limit: number; total: number; pages: number } | undefined {
+  const pagination: UpstreamPagination | undefined =
+    payload?.pagination || payload?.meta?.pagination;
+
+  if (!pagination) return undefined;
+
+  const page = Number(pagination.page || 1);
+  const limit = Number(pagination.limit || 20);
+  const total = Number(pagination.total || 0);
+  const pages = Number(pagination.pages || pagination.totalPages || 1);
+
+  return { page, limit, total, pages };
+}
+
+function normalizeTask(task: any): any {
+  const normalizedBudget =
+    typeof task?.budget === 'number'
+      ? task.budget
+      : Number(task?.budget?.amount ?? task?.budgetValue ?? 0);
+
+  return {
+    ...task,
+    taskId: task?.taskId || task?._id || task?.id,
+    posterId: task?.posterId || task?.requesterId,
+    budget: Number.isFinite(normalizedBudget) ? normalizedBudget : 0,
+  };
+}
+
+function normalizeApplication(application: any): any {
+  return {
+    ...application,
+    applicationId:
+      application?.applicationId || application?.id || application?._id,
+    taskerId: application?.taskerId || application?.applicantId,
+    proposedAmount:
+      application?.proposedAmount ?? application?.proposedBudget ?? undefined,
+  };
+}
+
 export class TaskManagementController {
   /**
    * GET /api/v1/tasks
@@ -33,10 +80,15 @@ export class TaskManagementController {
       };
       
       const result = await taskServiceClient.listTasks(params);
+      const tasks = Array.isArray(result?.data)
+        ? result.data.map(normalizeTask)
+        : [];
+      const pagination = extractPagination(result);
       
       res.json({
         success: true,
-        data: result.data || result,
+        data: tasks,
+        ...(pagination ? { pagination } : {}),
       });
     } catch (error: any) {
       logger.error('List tasks error:', error);
@@ -63,11 +115,15 @@ export class TaskManagementController {
       const profileId = req.query.profileId as string | undefined;
 
       const result = await taskServiceClient.listApplications(params, profileId);
+      const applications = Array.isArray(result?.data)
+        ? result.data.map(normalizeApplication)
+        : [];
+      const pagination = extractPagination(result);
 
       res.json({
         success: true,
-        data: result.data || result,
-        pagination: result.pagination,
+        data: applications,
+        ...(pagination ? { pagination } : {}),
       });
     } catch (error: any) {
       logger.error('List applications error:', error);
@@ -87,10 +143,11 @@ export class TaskManagementController {
       const { taskId } = req.params;
       
       const result = await taskServiceClient.getTask(taskId);
+      const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
       
       res.json({
         success: true,
-        data: result.data || result,
+        data: normalizedTask,
       });
     } catch (error: any) {
       logger.error('Get task error:', error);
@@ -186,11 +243,23 @@ export class TaskManagementController {
         status: req.query.status as string,
       };
       
-      const result = await taskServiceClient.getTaskApplications(taskId, params);
+      // Use applications listing endpoint for admin view. It does not require
+      // requester/tasker profile context and supports paging for all applications.
+      const result = await taskServiceClient.listApplications({
+        taskId,
+        status: params.status,
+        page: params.page,
+        limit: params.limit,
+      });
+      const applications = Array.isArray(result?.data)
+        ? result.data.map(normalizeApplication)
+        : [];
+      const pagination = extractPagination(result);
       
       res.json({
         success: true,
-        data: result.data || result,
+        data: applications,
+        ...(pagination ? { pagination } : {}),
       });
     } catch (error: any) {
       logger.error('Get task applications error:', error);

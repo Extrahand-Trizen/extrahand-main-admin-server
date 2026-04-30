@@ -154,7 +154,11 @@ export class AnalyticsController {
         userServiceClient.getTaskerAadhaarVerifiedCount(),
         taskServiceClient.listTasks({ page: 1, limit: 1 }),
         taskServiceClient.listTasks({ page: 1, limit: 1, status: 'open' }),
-        taskServiceClient.listTasks({ page: 1, limit: 1, status: 'in_progress' }),
+        taskServiceClient.listTasks({
+          page: 1,
+          limit: 1,
+          status: 'assigned,started,in_progress,review',
+        }),
         taskServiceClient.listTasks({ page: 1, limit: 1, status: 'completed' }),
       ]);
 

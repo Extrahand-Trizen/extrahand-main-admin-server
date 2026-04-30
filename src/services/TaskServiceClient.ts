@@ -67,7 +67,15 @@ export class TaskServiceClient {
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<any> {
-    const response = await this.client.get('/api/v1/tasks', { params });
+    const normalizedParams: Record<string, any> = { ...params };
+
+    // Task service filters by requesterId (profile ObjectId), while admin UI
+    // sends posterId. Mirror it so posted-task queries are accurate.
+    if (normalizedParams.posterId && !normalizedParams.requesterId) {
+      normalizedParams.requesterId = normalizedParams.posterId;
+    }
+
+    const response = await this.client.get('/api/v1/tasks', { params: normalizedParams });
     return response.data;
   }
   
