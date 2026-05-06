@@ -20,9 +20,9 @@ async function seedSuperAdmin(options: SeedOptions = {}) {
     // Connect to database
     await connectDatabase();
 
-    const email = options.email || process.env.SUPER_ADMIN_EMAIL || 'admin@extrahand.in';
-    const password = options.password || process.env.SUPER_ADMIN_PASSWORD || 'Admin@123';
-    const name = options.name || process.env.SUPER_ADMIN_NAME || 'Super Admin';
+    const email = options.email || process.env.SUPER_ADMIN_EMAIL || 'operationsmanager@extrahand.in';
+    const password = options.password || process.env.SUPER_ADMIN_PASSWORD || 'operationsmanager@123';
+    const name = options.name || process.env.SUPER_ADMIN_NAME || 'Operations Manager';
 
     // Check if super admin already exists
     const existingAdmin = await AdminUser.findOne({ email: email.toLowerCase() });
