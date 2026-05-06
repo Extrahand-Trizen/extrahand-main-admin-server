@@ -44,7 +44,7 @@ function normalizeTask(task: any): any {
   return {
     ...task,
     taskId: task?.taskId || task?._id || task?.id,
-    posterId: task?.posterId || task?.requesterId,
+    CustomerId: task?.CustomerId || task?.requesterId,
     budget: Number.isFinite(normalizedBudget) ? normalizedBudget : 0,
   };
 }
@@ -54,7 +54,7 @@ function normalizeApplication(application: any): any {
     ...application,
     applicationId:
       application?.applicationId || application?.id || application?._id,
-    taskerId: application?.taskerId || application?.applicantId,
+    HelperId: application?.HelperId || application?.applicantId,
     proposedAmount:
       application?.proposedAmount ?? application?.proposedBudget ?? undefined,
   };
@@ -73,7 +73,7 @@ export class TaskManagementController {
         search: req.query.search as string,
         status: req.query.status as string,
         category: req.query.category as string,
-        posterId: req.query.posterId as string,
+        CustomerId: req.query.CustomerId as string,
         assigneeId: req.query.assigneeId as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
@@ -244,7 +244,7 @@ export class TaskManagementController {
       };
       
       // Use applications listing endpoint for admin view. It does not require
-      // requester/tasker profile context and supports paging for all applications.
+      // requester/Helper profile context and supports paging for all applications.
       const result = await taskServiceClient.listApplications({
         taskId,
         status: params.status,

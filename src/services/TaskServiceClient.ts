@@ -52,6 +52,11 @@ export class TaskServiceClient {
     const response = await this.client.get(`/api/v1/tasks/${taskId}`);
     return response.data;
   }
+
+  async getTasksBatch(taskIds: string[]): Promise<any> {
+    const response = await this.client.post('/api/v1/tasks/batch', { taskIds });
+    return response.data;
+  }
   
   /**
    * List tasks with filters
@@ -62,7 +67,7 @@ export class TaskServiceClient {
     search?: string;
     status?: string;
     category?: string;
-    posterId?: string;
+    CustomerId?: string;
     assigneeId?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
@@ -70,9 +75,9 @@ export class TaskServiceClient {
     const normalizedParams: Record<string, any> = { ...params };
 
     // Task service filters by requesterId (profile ObjectId), while admin UI
-    // sends posterId. Mirror it so posted-task queries are accurate.
-    if (normalizedParams.posterId && !normalizedParams.requesterId) {
-      normalizedParams.requesterId = normalizedParams.posterId;
+    // sends CustomerId. Mirror it so posted-task queries are accurate.
+    if (normalizedParams.CustomerId && !normalizedParams.requesterId) {
+      normalizedParams.requesterId = normalizedParams.CustomerId;
     }
 
     const response = await this.client.get('/api/v1/tasks', { params: normalizedParams });
@@ -126,15 +131,15 @@ export class TaskServiceClient {
     return response.data;
   }
 
-  async getPosterAnalytics(requesterId: string, range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
-    const response = await this.client.get(`/api/v1/analytics/posters/${requesterId}`, {
+  async getCustomerAnalytics(requesterId: string, range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get(`/api/v1/analytics/Customers/${requesterId}`, {
       params: { range },
     });
     return response.data;
   }
 
-  async getPosterSummary(range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
-    const response = await this.client.get('/api/v1/analytics/posters/summary', {
+  async getCustomerSummary(range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
+    const response = await this.client.get('/api/v1/analytics/Customers/summary', {
       params: { range },
     });
     return response.data;

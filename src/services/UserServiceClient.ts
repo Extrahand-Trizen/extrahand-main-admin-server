@@ -80,9 +80,9 @@ export class UserServiceClient {
   }
 
   /**
-   * Get count of taskers with Aadhaar verified.
+   * Get count of Helpers with Aadhaar verified.
    */
-  async getTaskerAadhaarVerifiedCount(): Promise<any> {
+  async getHelperAadhaarVerifiedCount(): Promise<any> {
     const response = await this.client.get('/api/v1/profiles/internal/stats/taskers/aadhaar-verified');
     return response.data;
   }
@@ -92,6 +92,11 @@ export class UserServiceClient {
    */
   async getProfilesBatch(profileIds: string[]): Promise<any> {
     const response = await this.client.post('/api/v1/profiles/batch', { profileIds });
+    return response.data;
+  }
+
+  async getProfilesBatchByUids(uids: string[]): Promise<any> {
+    const response = await this.client.post('/api/v1/profiles/batch/uids', { uids });
     return response.data;
   }
   

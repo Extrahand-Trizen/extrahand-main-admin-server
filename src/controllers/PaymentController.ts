@@ -97,8 +97,53 @@ export class PaymentController {
         req.query as Record<string, any>,
         { success: true, total: 0, transactions: [] }
       );
+
+      const rawTransactions = data.transactions ?? [];
       const userCache = new Map<string, { userId?: string; name?: string }>();
       const taskTitleCache = new Map<string, string>();
+
+      // Optimization: Extract all unique IDs to fetch in batch
+      const uniqueUids = new Set<string>();
+      const uniqueTaskIds = new Set<string>();
+
+      rawTransactions.forEach((row: any) => {
+        if (row.posterUid) uniqueUids.add(row.posterUid);
+        if (row.performerUid) uniqueUids.add(row.performerUid);
+        if (row.taskId) uniqueTaskIds.add(row.taskId);
+      });
+
+      // Fetch in batch to avoid N+1 requests and slow individual stats lookups
+      await Promise.all([
+        (async () => {
+          if (uniqueUids.size > 0) {
+            try {
+              const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
+              const users = usersResult?.profiles || [];
+              users.forEach((u: any) => {
+                userCache.set(u.uid, {
+                  userId: u.uid,
+                  name: u.name,
+                });
+              });
+            } catch (err) {
+              logger.warn('Batch user resolution failed, falling back to individual lookups');
+            }
+          }
+        })(),
+        (async () => {
+          if (uniqueTaskIds.size > 0) {
+            try {
+              const tasksResult = await taskServiceClient.getTasksBatch(Array.from(uniqueTaskIds));
+              const tasks = tasksResult?.tasks || [];
+              tasks.forEach((t: any) => {
+                taskTitleCache.set(t._id || t.id, t.title);
+              });
+            } catch (err) {
+              logger.warn('Batch task resolution failed, falling back to individual lookups');
+            }
+          }
+        })(),
+      ]);
 
       const resolveUser = async (
         uid?: string
@@ -108,17 +153,11 @@ export class PaymentController {
           return userCache.get(uid) || {};
         }
         try {
-          const usersResult = await userServiceClient.listUsers({
-            search: uid,
-            page: 1,
-            limit: 5,
-          });
-          const users = usersResult?.data || [];
-          const exact = users.find(
-            (u: any) => u?.uid === uid || u?.userId === uid || u?._id === uid
-          );
+          // Individual fallback if not in batch
+          const userResult = await userServiceClient.getUser(uid);
+          const exact = userResult?.data || userResult;
           const resolved = {
-            userId: exact?.userId || exact?._id,
+            userId: exact?.uid || exact?.userId || exact?._id,
             name:
               exact?.name ||
               [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') ||
@@ -138,6 +177,7 @@ export class PaymentController {
           return taskTitleCache.get(taskId);
         }
         try {
+          // Individual fallback if not in batch
           const taskResult = await taskServiceClient.getTask(taskId);
           const taskData = taskResult?.data || taskResult;
           const title = taskData?.title as string | undefined;
@@ -152,19 +192,22 @@ export class PaymentController {
       };
 
       const transactions = await Promise.all(
-        (data.transactions ?? []).map(async (row: any) => {
-          const poster = await resolveUser(row.posterUid);
-          const performer = await resolveUser(row.performerUid);
-          const taskTitle = await resolveTaskTitle(row.taskId);
+        rawTransactions.map(async (row: any) => {
+          const [customer, helper, taskTitle] = await Promise.all([
+            resolveUser(row.posterUid),
+            resolveUser(row.performerUid),
+            resolveTaskTitle(row.taskId),
+          ]);
+
           return {
             ...row,
             links: {
-              posterUserId: poster.userId,
-              performerUserId: performer.userId,
+              customerUserId: customer.userId,
+              helperUserId: helper.userId,
               taskId: row.taskId,
-              posterName: poster.name || row.posterUid,
+              customerName: customer.name || row.posterUid,
               taskTitle: taskTitle || row.taskId,
-              taskerName: performer.name || row.performerUid,
+              helperName: helper.name || row.performerUid,
             },
           };
         })

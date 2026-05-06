@@ -28,15 +28,15 @@ router.get(
 );
 
 router.get(
-  '/posters/verification-comparison',
+  '/Customers/verification-comparison',
   requirePermission(`${Resource.ANALYTICS}.${Action.VIEW}`),
-  AnalyticsController.getPosterVerificationComparison
+  AnalyticsController.getCustomerVerificationComparison
 );
 
 router.get(
-  '/posters/:requesterId',
+  '/Customers/:requesterId',
   requirePermission(`${Resource.ANALYTICS}.${Action.VIEW}`),
-  AnalyticsController.getPosterAnalytics
+  AnalyticsController.getCustomerAnalytics
 );
 
 router.get(
