@@ -8,7 +8,7 @@ export class PaymentServiceClient {
   constructor() {
     this.client = axios.create({
       // Mirror financial-admin backend default payment service port.
-      baseURL: env.PAYMENT_SERVICE_URL || 'http://localhost:4009',
+      baseURL: env.PAYMENT_SERVICE_URL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',

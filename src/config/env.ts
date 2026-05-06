@@ -29,7 +29,7 @@ const envSchema = z.object({
   // External Services
   USER_SERVICE_URL: z.string().url().optional(),
   TASK_SERVICE_URL: z.string().url().optional(),
-  PAYMENT_SERVICE_URL: z.string().url().optional(),
+  PAYMENT_SERVICE_URL: z.string().url().default('http://localhost:4009'),
   SUPPORT_SERVICE_URL: z.string().url().optional(),
   SERVICE_AUTH_TOKEN: z.string().min(32),
   
