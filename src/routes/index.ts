@@ -7,6 +7,7 @@ import inviteRoutes from './invites';
 import supportRoutes from './support';
 import analyticsRoutes from './analytics';
 import applicationRoutes from './applications';
+import paymentRoutes from './payments';
 
 const router = Router();
 
@@ -22,6 +23,7 @@ router.use(`${API_PREFIX}/applications`, applicationRoutes);
 router.use(`${API_PREFIX}/invites`, inviteRoutes);
 router.use(`${API_PREFIX}/support`, supportRoutes);
 router.use(`${API_PREFIX}/analytics`, analyticsRoutes);
+router.use(`${API_PREFIX}/payments`, paymentRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

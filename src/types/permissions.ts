@@ -27,6 +27,9 @@ export enum Resource {
   
   // Analytics
   ANALYTICS = 'analytics',
+
+  // Payments
+  PAYMENT = 'payment',
 }
 
 export enum Action {
@@ -110,6 +113,10 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
     `${Resource.ANALYTICS}.${Action.EXPORT}`,
+
+    // Payments
+    `${Resource.PAYMENT}.${Action.VIEW}`,
+    `${Resource.PAYMENT}.${Action.LIST}`,
   ],
   
   operations: [
@@ -141,6 +148,10 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
+
+    // Payments
+    `${Resource.PAYMENT}.${Action.VIEW}`,
+    `${Resource.PAYMENT}.${Action.LIST}`,
   ],
   
   support: [
