@@ -67,6 +67,8 @@ export class InviteController {
         if (env.EMAIL_SERVICE_URL) {
           const inviteUrl = `${env.MAIN_ADMIN_DASHBOARD_URL}/accept-invite?token=${token}&inviteId=${invite.inviteId}`;
 
+          const emailServiceAuthToken = env.EMAIL_SERVICE_AUTH_TOKEN || env.SERVICE_AUTH_TOKEN;
+
           await axios.post(
             `${env.EMAIL_SERVICE_URL}/api/v1/email/admin-invite`,
             {
@@ -79,7 +81,7 @@ export class InviteController {
             },
             {
               headers: {
-                'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+                'X-Service-Auth': emailServiceAuthToken,
                 'X-Service-Name': 'main-admin-server',
                 'X-User-Id': req.admin!.userId,
               },
@@ -212,6 +214,8 @@ export class InviteController {
         if (env.EMAIL_SERVICE_URL) {
           const inviteUrl = `${env.MAIN_ADMIN_DASHBOARD_URL}/accept-invite?token=${newToken}&inviteId=${invite.inviteId}`;
 
+          const emailServiceAuthToken = env.EMAIL_SERVICE_AUTH_TOKEN || env.SERVICE_AUTH_TOKEN;
+
           await axios.post(
             `${env.EMAIL_SERVICE_URL}/api/v1/email/admin-invite`,
             {
@@ -224,7 +228,7 @@ export class InviteController {
             },
             {
               headers: {
-                'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+                'X-Service-Auth': emailServiceAuthToken,
                 'X-Service-Name': 'main-admin-server',
                 'X-User-Id': req.admin!.userId,
               },

@@ -35,6 +35,7 @@ const envSchema = z.object({
   
   // Email Service (for invites)
   EMAIL_SERVICE_URL: z.string().url().optional(),
+  EMAIL_SERVICE_AUTH_TOKEN: z.string().min(32).optional(),
   
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 });
