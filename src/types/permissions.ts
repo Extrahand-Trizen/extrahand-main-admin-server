@@ -192,10 +192,6 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
   payments_admin: [
     `${Resource.PAYMENT}.${Action.VIEW}`,
     `${Resource.PAYMENT}.${Action.LIST}`,
-    `${Resource.ANALYTICS}.${Action.VIEW}`,
-    `${Resource.ANALYTICS}.${Action.EXPORT}`,
-    `${Resource.TASK}.${Action.VIEW}`,
-    `${Resource.TASK}.${Action.LIST}`,
   ],
   
   trust: [
