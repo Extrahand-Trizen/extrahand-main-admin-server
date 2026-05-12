@@ -3,14 +3,7 @@ import logger from '../config/logger';
 import { paymentServiceClient } from '../services/PaymentServiceClient';
 import { userServiceClient } from '../services/UserServiceClient';
 import { taskServiceClient } from '../services/TaskServiceClient';
-
-function getClientSafeStatus(error: any): number {
-  const upstreamStatus = Number(error?.response?.status || 0);
-  if (upstreamStatus === 401) {
-    return 502;
-  }
-  return upstreamStatus || 500;
-}
+import { getClientSafeStatus } from '../utils/upstreamHttp';
 
 async function safeGet<T>(
   path: string,

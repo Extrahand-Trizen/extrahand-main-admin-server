@@ -3,6 +3,7 @@ import { userServiceClient } from '../services/UserServiceClient';
 import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
+import { getClientSafeStatus } from '../utils/upstreamHttp';
 
 export class UserManagementController {
   /**
@@ -41,7 +42,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('List users error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list users',
       });
@@ -64,7 +65,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('Get user error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get user',
       });
@@ -99,7 +100,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('Update user error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update user',
       });
@@ -145,7 +146,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('Ban user error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to ban user',
       });
@@ -181,7 +182,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('Unban user error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to unban user',
       });
@@ -227,7 +228,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('Suspend user error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to suspend user',
       });
@@ -263,7 +264,7 @@ export class UserManagementController {
       });
     } catch (error: any) {
       logger.error('Unsuspend user error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to unsuspend user',
       });

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { userServiceClient } from '../services/UserServiceClient';
 import { taskServiceClient } from '../services/TaskServiceClient';
 import logger from '../config/logger';
+import { getClientSafeStatus } from '../utils/upstreamHttp';
 import {
   AnalyticsRange,
   CustomerAnalyticsDto,
@@ -55,15 +56,6 @@ function derivePrimaryRole(roles: Array<'Helper' | 'Customer'>): 'Helper' | 'Cus
   if (roles.includes('Helper')) return 'Helper';
   if (roles.includes('Customer')) return 'Customer';
   return 'unknown';
-}
-
-function getClientSafeStatus(error: any): number {
-  const upstreamStatus = Number(error?.response?.status || 0);
-  // Downstream service-auth failures should not be interpreted by browser as admin auth expiry.
-  if (upstreamStatus === 401) {
-    return 502;
-  }
-  return upstreamStatus || 500;
 }
 
 export class AnalyticsController {
@@ -162,15 +154,24 @@ export class AnalyticsController {
         taskServiceClient.listTasks({ page: 1, limit: 1, status: 'completed' }),
       ]);
 
-      const userCountsRaw = results[0].status === 'fulfilled' ? (results[0].value?.data || { posters: 0, taskers: 0 }) : { posters: 0, taskers: 0 };
+      const userCountsRaw =
+        results[0].status === 'fulfilled'
+          ? results[0].value?.data || { posters: 0, taskers: 0, totalProfiles: 0 }
+          : { posters: 0, taskers: 0, totalProfiles: 0 };
       const userCounts = {
         Customers: userCountsRaw.posters || 0,
-        Helpers: userCountsRaw.taskers || 0
+        Helpers: userCountsRaw.taskers || 0,
+        totalPlatformUsers: Number(userCountsRaw.totalProfiles || 0),
       };
-      
-      const HelperAadhaarVerified = results[1].status === 'fulfilled'
-        ? Number(results[1].value?.data || results[1].value || 0)
-        : 0;
+
+      // user-service returns { taskersAadhaarVerified: n } — do not Number() the whole object
+      const aadhaarPayload =
+        results[1].status === 'fulfilled' ? results[1].value?.data : undefined;
+      const HelperAadhaarVerified = Number(
+        (aadhaarPayload as any)?.taskersAadhaarVerified ??
+          (aadhaarPayload as any)?.count ??
+          0,
+      );
       const totalTaskResult = results[2].status === 'fulfilled' ? results[2].value : {};
       const openTaskResult = results[3].status === 'fulfilled' ? results[3].value : {};
       const inProgressTaskResult = results[4].status === 'fulfilled' ? results[4].value : {};
@@ -179,6 +180,9 @@ export class AnalyticsController {
       const taskServiceHealthy = results.slice(2).every((result) => result.status === 'fulfilled');
 
       const data = {
+        platform: {
+          totalRegisteredUsers: userCounts.totalPlatformUsers,
+        },
         Customers: {
           totalRegistered: userCounts.Customers,
         },
@@ -201,7 +205,7 @@ export class AnalyticsController {
       res.json({ success: true, data });
     } catch (error: any) {
       logger.error('Get analytics overview error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to fetch analytics overview',
       });

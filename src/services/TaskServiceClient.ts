@@ -93,11 +93,20 @@ export class TaskServiceClient {
   }
   
   /**
-   * Delete task
+   * Delete task (admin impersonates requester via X-Profile-Id so task-service authZ passes)
    */
-  async deleteTask(taskId: string, reason: string): Promise<any> {
+  async deleteTask(
+    taskId: string,
+    reason: string,
+    opts?: { requesterProfileId?: string },
+  ): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (opts?.requesterProfileId) {
+      headers['X-Profile-Id'] = opts.requesterProfileId;
+    }
     const response = await this.client.delete(`/api/v1/tasks/${taskId}`, {
       data: { reason },
+      headers,
     });
     return response.data;
   }

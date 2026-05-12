@@ -3,15 +3,7 @@ import { taskServiceClient } from '../services/TaskServiceClient';
 import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
-
-function getClientSafeStatus(error: any): number {
-  const upstreamStatus = Number(error?.response?.status || 0);
-  // Prevent downstream service-auth 401 from forcing admin logout in web client.
-  if (upstreamStatus === 401) {
-    return 502;
-  }
-  return upstreamStatus || 500;
-}
+import { getClientSafeStatus } from '../utils/upstreamHttp';
 
 type UpstreamPagination = {
   page?: number;
@@ -67,13 +59,15 @@ export class TaskManagementController {
    */
   static async listTasks(req: Request, res: Response): Promise<void> {
     try {
+      const customerFilter =
+        (req.query.customerId as string) || (req.query.CustomerId as string);
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined,
         search: req.query.search as string,
         status: req.query.status as string,
         category: req.query.category as string,
-        CustomerId: req.query.CustomerId as string,
+        CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
@@ -127,7 +121,7 @@ export class TaskManagementController {
       });
     } catch (error: any) {
       logger.error('List applications error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list applications',
       });
@@ -198,15 +192,30 @@ export class TaskManagementController {
       const { taskId } = req.params;
       const { reason } = req.body;
       
-      if (!reason) {
+      if (!reason?.trim()) {
         res.status(400).json({
           success: false,
           error: 'Reason is required for deleting a task',
         });
         return;
       }
-      
-      const result = await taskServiceClient.deleteTask(taskId, reason);
+
+      const taskPayload = await taskServiceClient.getTask(taskId);
+      const rawTask = taskPayload?.data ?? taskPayload;
+      const requesterProfileId = String(
+        rawTask?.CustomerId || rawTask?.requesterId || '',
+      ).trim();
+      if (!rawTask || !requesterProfileId) {
+        res.status(404).json({
+          success: false,
+          error: 'Task not found or missing requester for delete',
+        });
+        return;
+      }
+
+      const result = await taskServiceClient.deleteTask(taskId, reason.trim(), {
+        requesterProfileId,
+      });
       
       await createAuditLog(
         req,

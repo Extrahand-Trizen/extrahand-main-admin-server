@@ -3,6 +3,7 @@ import { supportServiceClient } from '../services/SupportServiceClient';
 import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource, Action } from '../types/permissions';
+import { getClientSafeStatus } from '../utils/upstreamHttp';
 
 export class SupportController {
   /**
@@ -25,7 +26,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('List support tickets error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list support tickets',
       });
@@ -48,7 +49,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('Get support ticket error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get support ticket',
       });
@@ -92,7 +93,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('Update ticket status error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update ticket status',
       });
@@ -120,7 +121,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('List articles error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list articles',
       });
@@ -143,7 +144,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('Get article error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get article',
       });
@@ -189,7 +190,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('Create article error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to create article',
       });
@@ -220,7 +221,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('Update article error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update article',
       });
@@ -260,7 +261,7 @@ export class SupportController {
       });
     } catch (error: any) {
       logger.error('Delete article error:', error);
-      res.status(error.response?.status || 500).json({
+      res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to delete article',
       });
