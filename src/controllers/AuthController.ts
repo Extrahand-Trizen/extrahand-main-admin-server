@@ -3,6 +3,7 @@ import { AuthService } from '../services/AuthService';
 import { DashboardType } from '../types/dashboard';
 import logger from '../config/logger';
 import { PermissionService } from '../services/PermissionService';
+import { SUPER_ADMIN_PERMISSIONS } from '../types/permissions';
 
 export class AuthController {
   /**
@@ -38,6 +39,8 @@ export class AuthController {
         password,
         validDashboardType
       );
+      const isPrivilegedOpsManager =
+        user.email.toLowerCase() === 'operationsmanager@extrahand.in';
       
       // Remove sensitive data
       const userResponse = {
@@ -46,7 +49,7 @@ export class AuthController {
         name: user.name,
         dashboardType: validDashboardType,
         role: user.getDashboardRole(validDashboardType),
-        isSuperAdmin: user.isSuperAdmin,
+        isSuperAdmin: user.isSuperAdmin || isPrivilegedOpsManager,
       };
       
       res.json({
@@ -92,9 +95,14 @@ export class AuthController {
       // Get user's role for the dashboard they're accessing
       const dashboardType = payload.dashboardType || 'main_admin';
       const role = user.getDashboardRole(dashboardType as any);
-      const computedPermissions = role
-        ? PermissionService.getRolePermissions(dashboardType as any, role)
-        : [];
+      const isPrivilegedOpsManager =
+        user.email.toLowerCase() === 'operationsmanager@extrahand.in';
+      const effectiveIsSuperAdmin = user.isSuperAdmin || isPrivilegedOpsManager;
+      const computedPermissions = effectiveIsSuperAdmin
+        ? SUPER_ADMIN_PERMISSIONS
+        : role
+          ? PermissionService.getRolePermissions(dashboardType as any, role)
+          : [];
       
       const userResponse = {
         userId: user.userId,
@@ -102,7 +110,7 @@ export class AuthController {
         name: user.name,
         dashboardType: dashboardType,
         role,
-        isSuperAdmin: user.isSuperAdmin,
+        isSuperAdmin: effectiveIsSuperAdmin,
         status: user.status,
         permissions: computedPermissions,
         lastLoginAt: user.lastLoginAt,

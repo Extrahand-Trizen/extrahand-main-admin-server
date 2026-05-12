@@ -80,10 +80,32 @@ export class UserServiceClient {
   }
 
   /**
+   * Preview or delete users that have no role saved.
+   * dryRun=true (default) — returns a list without deleting anything.
+   * dryRun=false — performs full cascade deletion.
+   */
+  async cleanupUsersWithoutRoles(dryRun = true): Promise<any> {
+    if (dryRun) {
+      const response = await this.client.get('/api/v1/users/cleanup/no-role');
+      return response.data;
+    }
+    const response = await this.client.post('/api/v1/users/cleanup/no-role', { dry_run: false });
+    return response.data;
+  }
+
+  /**
    * Get count of Helpers with Aadhaar verified.
    */
   async getHelperAadhaarVerifiedCount(): Promise<any> {
     const response = await this.client.get('/api/v1/profiles/internal/stats/taskers/aadhaar-verified');
+    return response.data;
+  }
+
+  /**
+   * Get helper counts by skill categories (service auth).
+   */
+  async getHelperCategoryCounts(): Promise<any> {
+    const response = await this.client.get('/api/v1/profiles/internal/stats/taskers/category-counts');
     return response.data;
   }
 

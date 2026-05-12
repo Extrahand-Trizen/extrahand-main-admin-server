@@ -3,6 +3,7 @@ import { AuthService, TokenPayload } from '../services/AuthService';
 import { AdminUser } from '../models/AdminUser';
 import logger from '../config/logger';
 import { DashboardType } from '../types/dashboard';
+import { SUPER_ADMIN_PERMISSIONS } from '../types/permissions';
 
 // Extend Express Request to include admin user
 declare global {
@@ -56,7 +57,12 @@ export const verifyAuth = async (
     
     // Get permissions for this dashboard and role
     const { PermissionService } = await import('../services/PermissionService');
-    const permissions = PermissionService.getRolePermissions(
+    const isPrivilegedOpsManager =
+      user.email.toLowerCase() === 'operationsmanager@extrahand.in';
+    const effectiveIsSuperAdmin = user.isSuperAdmin || isPrivilegedOpsManager;
+    const permissions = effectiveIsSuperAdmin
+      ? SUPER_ADMIN_PERMISSIONS
+      : PermissionService.getRolePermissions(
       payload.dashboardType,
       payload.role
     );
@@ -68,7 +74,7 @@ export const verifyAuth = async (
       name: user.name,
       dashboardType: payload.dashboardType,
       role: payload.role,
-      isSuperAdmin: user.isSuperAdmin,
+      isSuperAdmin: effectiveIsSuperAdmin,
       permissions: permissions,
     };
     

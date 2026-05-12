@@ -20,6 +20,9 @@ export interface AuthTokens {
 }
 
 export class AuthService {
+  private static isPrivilegedOpsManager(email: string): boolean {
+    return email.toLowerCase() === 'operationsmanager@extrahand.in';
+  }
   /**
    * Generate access and refresh tokens
    */
@@ -128,7 +131,7 @@ export class AuthService {
       email: user.email,
       dashboardType,
       role,
-      isSuperAdmin: user.isSuperAdmin,
+      isSuperAdmin: user.isSuperAdmin || this.isPrivilegedOpsManager(user.email),
     });
     
     // Store refresh token
@@ -182,7 +185,7 @@ export class AuthService {
       email: user.email,
       dashboardType,
       role,
-      isSuperAdmin: user.isSuperAdmin,
+      isSuperAdmin: user.isSuperAdmin || this.isPrivilegedOpsManager(user.email),
     });
     
     // Update refresh token

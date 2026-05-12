@@ -42,8 +42,9 @@ function normalizeRoles(roles: unknown): Array<'Helper' | 'Customer'> {
   const normalized = new Set<'Helper' | 'Customer'>();
   for (const rawRole of roles) {
     const role = String(rawRole || '').trim().toLowerCase();
-    if (role === 'Helper' || role === 'tasker') normalized.add('Helper');
-    if (role === 'Customer' || role === 'poster' || role === 'requester') normalized.add('Customer');
+    // Map all legacy and new variants
+    if (role === 'tasker' || role === 'helper') normalized.add('Helper');
+    if (role === 'poster' || role === 'requester' || role === 'customer') normalized.add('Customer');
     if (role === 'both') {
       normalized.add('Helper');
       normalized.add('Customer');
@@ -144,6 +145,7 @@ export class AnalyticsController {
       const results = await Promise.allSettled([
         userServiceClient.getRoleCounts(),
         userServiceClient.getHelperAadhaarVerifiedCount(),
+        userServiceClient.getHelperCategoryCounts(),
         taskServiceClient.listTasks({ page: 1, limit: 1 }),
         taskServiceClient.listTasks({ page: 1, limit: 1, status: 'open' }),
         taskServiceClient.listTasks({
@@ -156,11 +158,11 @@ export class AnalyticsController {
 
       const userCountsRaw =
         results[0].status === 'fulfilled'
-          ? results[0].value?.data || { posters: 0, taskers: 0, totalProfiles: 0 }
-          : { posters: 0, taskers: 0, totalProfiles: 0 };
+          ? results[0].value?.data || { customers: 0, helpers: 0, totalProfiles: 0 }
+          : { customers: 0, helpers: 0, totalProfiles: 0 };
       const userCounts = {
-        Customers: userCountsRaw.posters || 0,
-        Helpers: userCountsRaw.taskers || 0,
+        Customers: userCountsRaw.customers || userCountsRaw.posters || 0,
+        Helpers: userCountsRaw.helpers || userCountsRaw.taskers || 0,
         totalPlatformUsers: Number(userCountsRaw.totalProfiles || 0),
       };
 
@@ -172,12 +174,20 @@ export class AnalyticsController {
           (aadhaarPayload as any)?.count ??
           0,
       );
-      const totalTaskResult = results[2].status === 'fulfilled' ? results[2].value : {};
-      const openTaskResult = results[3].status === 'fulfilled' ? results[3].value : {};
-      const inProgressTaskResult = results[4].status === 'fulfilled' ? results[4].value : {};
-      const completedTaskResult = results[5].status === 'fulfilled' ? results[5].value : {};
+      const helperCategoryCounts =
+        results[2].status === 'fulfilled'
+          ? Array.isArray(results[2].value?.data?.categories)
+            ? results[2].value.data.categories
+            : []
+          : [];
+      const helperCategorySummary =
+        results[2].status === 'fulfilled' ? results[2].value?.data?.summary || {} : {};
+      const totalTaskResult = results[3].status === 'fulfilled' ? results[3].value : {};
+      const openTaskResult = results[4].status === 'fulfilled' ? results[4].value : {};
+      const inProgressTaskResult = results[5].status === 'fulfilled' ? results[5].value : {};
+      const completedTaskResult = results[6].status === 'fulfilled' ? results[6].value : {};
 
-      const taskServiceHealthy = results.slice(2).every((result) => result.status === 'fulfilled');
+      const taskServiceHealthy = results.slice(3).every((result) => result.status === 'fulfilled');
 
       const data = {
         platform: {
@@ -189,6 +199,12 @@ export class AnalyticsController {
         Helpers: {
           totalRegistered: userCounts.Helpers,
           aadhaarVerified: HelperAadhaarVerified,
+          categoryCounts: helperCategoryCounts,
+          categorySummary: {
+            totalHelpers: Number(helperCategorySummary?.totalHelpers || 0),
+            categorizedHelpers: Number(helperCategorySummary?.categorizedHelpers || 0),
+            uncategorizedHelpers: Number(helperCategorySummary?.uncategorizedHelpers || 0),
+          },
         },
         tasks: {
           total: extractTotal(totalTaskResult),

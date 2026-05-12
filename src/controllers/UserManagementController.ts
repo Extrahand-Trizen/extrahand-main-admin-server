@@ -48,6 +48,28 @@ export class UserManagementController {
       });
     }
   }
+
+  /**
+   * GET  /api/v1/users/cleanup/no-role?dry_run=true   — preview (default)
+   * POST /api/v1/users/cleanup/no-role                 — delete (body: { dry_run: false })
+   */
+  static async cleanupUsersWithoutRoles(req: Request, res: Response): Promise<void> {
+    try {
+      const dryRunParam = req.query.dry_run ?? (req.body && req.body.dry_run);
+      const dryRun = dryRunParam === undefined ? true : String(dryRunParam) !== 'false';
+
+      const result = await userServiceClient.cleanupUsersWithoutRoles(dryRun);
+
+      res.json(result);
+    } catch (error: any) {
+      logger.error('Cleanup no-role users error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to cleanup users without roles',
+      });
+    }
+  }
+
   
   /**
    * GET /api/v1/users/:userId
