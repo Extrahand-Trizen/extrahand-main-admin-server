@@ -11,6 +11,9 @@ export class PermissionService {
     }
     
     if (dashboardType === DashboardType.MAIN_ADMIN) {
+      if (role === 'super_admin') {
+        return SUPER_ADMIN_PERMISSIONS;
+      }
       return MAIN_ADMIN_PERMISSIONS[role] || [];
     }
     

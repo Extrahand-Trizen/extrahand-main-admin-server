@@ -66,20 +66,25 @@ export class InviteController {
       try {
         if (env.EMAIL_SERVICE_URL) {
           const inviteUrl = `${env.MAIN_ADMIN_DASHBOARD_URL}/accept-invite?token=${token}&inviteId=${invite.inviteId}`;
-          
-          await axios.post(`${env.EMAIL_SERVICE_URL}/api/v1/send`, {
-            to: email,
-            subject: `Invitation to join ExtraHand ${dashboardType.replace('_', ' ')} Dashboard`,
-            template: 'admin-invite',
-            data: {
-              name: email.split('@')[0],
-              dashboardType,
+
+          await axios.post(
+            `${env.EMAIL_SERVICE_URL}/api/v1/email/admin-invite`,
+            {
+              email: email,
               role,
-              inviteUrl,
-              customMessage,
-              invitedBy: req.admin!.name,
+              inviteLink: inviteUrl,
+              expiresAt: invite.expiresAt,
+              name: email.split('@')[0],
+              platformName: 'ExtraHand Main Admin',
             },
-          });
+            {
+              headers: {
+                'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+                'X-Service-Name': 'main-admin-server',
+                'X-User-Id': req.admin!.userId,
+              },
+            }
+          );
         }
       } catch (emailError: any) {
         logger.error('Failed to send invite email:', emailError);
@@ -206,20 +211,25 @@ export class InviteController {
       try {
         if (env.EMAIL_SERVICE_URL) {
           const inviteUrl = `${env.MAIN_ADMIN_DASHBOARD_URL}/accept-invite?token=${newToken}&inviteId=${invite.inviteId}`;
-          
-          await axios.post(`${env.EMAIL_SERVICE_URL}/api/v1/send`, {
-            to: invite.email,
-            subject: `Invitation to join ExtraHand ${invite.dashboardType.replace('_', ' ')} Dashboard`,
-            template: 'admin-invite',
-            data: {
-              name: invite.email.split('@')[0],
-              dashboardType: invite.dashboardType,
+
+          await axios.post(
+            `${env.EMAIL_SERVICE_URL}/api/v1/email/admin-invite`,
+            {
+              email: invite.email,
               role: invite.role,
-              inviteUrl,
-              customMessage: invite.customMessage,
-              invitedBy: invite.invitedByName,
+              inviteLink: inviteUrl,
+              expiresAt: invite.expiresAt,
+              name: invite.email.split('@')[0],
+              platformName: 'ExtraHand Main Admin',
             },
-          });
+            {
+              headers: {
+                'X-Service-Auth': env.SERVICE_AUTH_TOKEN,
+                'X-Service-Name': 'main-admin-server',
+                'X-User-Id': req.admin!.userId,
+              },
+            }
+          );
         }
       } catch (emailError: any) {
         logger.error('Failed to resend invite email:', emailError);
