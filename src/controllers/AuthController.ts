@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
 import { DashboardType } from '../types/dashboard';
 import logger from '../config/logger';
+import { PermissionService } from '../services/PermissionService';
 
 export class AuthController {
   /**
@@ -90,19 +91,20 @@ export class AuthController {
       
       // Get user's role for the dashboard they're accessing
       const dashboardType = payload.dashboardType || 'main_admin';
-      const dashboardAccess = user.dashboardAccess.find(
-        (a) => a.dashboardType === dashboardType
-      );
+      const role = user.getDashboardRole(dashboardType as any);
+      const computedPermissions = role
+        ? PermissionService.getRolePermissions(dashboardType as any, role)
+        : [];
       
       const userResponse = {
         userId: user.userId,
         email: user.email,
         name: user.name,
         dashboardType: dashboardType,
-        role: user.getDashboardRole(dashboardType as any),
+        role,
         isSuperAdmin: user.isSuperAdmin,
         status: user.status,
-        permissions: dashboardAccess?.permissions || [],
+        permissions: computedPermissions,
         lastLoginAt: user.lastLoginAt,
       };
       

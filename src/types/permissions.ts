@@ -131,20 +131,10 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.TASK}.${Action.LIST}`,
     `${Resource.TASK}.${Action.SEARCH}`,
     `${Resource.TASK}.${Action.UPDATE}`,
+    `${Resource.TASK}.${Action.DELETE}`,
     `${Resource.TASK}.${Action.ASSIGN}`,
     `${Resource.TASK_APPLICATION}.${Action.VIEW}`,
     `${Resource.TASK_APPLICATION}.${Action.LIST}`,
-    
-    // Disputes
-    `${Resource.DISPUTE}.${Action.VIEW}`,
-    `${Resource.DISPUTE}.${Action.LIST}`,
-    `${Resource.DISPUTE}.${Action.RESOLVE}`,
-    
-    // Support
-    `${Resource.SUPPORT_TICKET}.${Action.VIEW}`,
-    `${Resource.SUPPORT_TICKET}.${Action.LIST}`,
-    `${Resource.SUPPORT_TICKET}.${Action.UPDATE}`,
-    `${Resource.SUPPORT_TICKET}.${Action.ASSIGN}`,
     
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
@@ -163,20 +153,10 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.TASK}.${Action.LIST}`,
     `${Resource.TASK}.${Action.SEARCH}`,
     `${Resource.TASK}.${Action.UPDATE}`,
+    `${Resource.TASK}.${Action.DELETE}`,
     `${Resource.TASK}.${Action.ASSIGN}`,
     `${Resource.TASK_APPLICATION}.${Action.VIEW}`,
     `${Resource.TASK_APPLICATION}.${Action.LIST}`,
-
-    // Disputes
-    `${Resource.DISPUTE}.${Action.VIEW}`,
-    `${Resource.DISPUTE}.${Action.LIST}`,
-    `${Resource.DISPUTE}.${Action.RESOLVE}`,
-
-    // Support
-    `${Resource.SUPPORT_TICKET}.${Action.VIEW}`,
-    `${Resource.SUPPORT_TICKET}.${Action.LIST}`,
-    `${Resource.SUPPORT_TICKET}.${Action.UPDATE}`,
-    `${Resource.SUPPORT_TICKET}.${Action.ASSIGN}`,
 
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
@@ -193,12 +173,6 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.TASK}.${Action.LIST}`,
     `${Resource.TASK_APPLICATION}.${Action.VIEW}`,
     `${Resource.TASK_APPLICATION}.${Action.LIST}`,
-    
-    // Support
-    `${Resource.SUPPORT_TICKET}.${Action.VIEW}`,
-    `${Resource.SUPPORT_TICKET}.${Action.LIST}`,
-    `${Resource.SUPPORT_TICKET}.${Action.UPDATE}`,
-    `${Resource.SUPPORT_TICKET}.${Action.ASSIGN}`,
   ],
 
   // Invite flow role aliases
@@ -213,12 +187,6 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.TASK}.${Action.LIST}`,
     `${Resource.TASK_APPLICATION}.${Action.VIEW}`,
     `${Resource.TASK_APPLICATION}.${Action.LIST}`,
-
-    // Support
-    `${Resource.SUPPORT_TICKET}.${Action.VIEW}`,
-    `${Resource.SUPPORT_TICKET}.${Action.LIST}`,
-    `${Resource.SUPPORT_TICKET}.${Action.UPDATE}`,
-    `${Resource.SUPPORT_TICKET}.${Action.ASSIGN}`,
   ],
 
   payments_admin: [
@@ -226,6 +194,8 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.PAYMENT}.${Action.LIST}`,
     `${Resource.ANALYTICS}.${Action.VIEW}`,
     `${Resource.ANALYTICS}.${Action.EXPORT}`,
+    `${Resource.TASK}.${Action.VIEW}`,
+    `${Resource.TASK}.${Action.LIST}`,
   ],
   
   trust: [
