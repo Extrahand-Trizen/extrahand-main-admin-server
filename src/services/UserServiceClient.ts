@@ -4,7 +4,12 @@ import logger from '../config/logger';
 
 export class UserServiceClient {
   private client: AxiosInstance;
-  
+
+  /** Encode segment for /users/:userId (Firebase uid or Mongo ObjectId hex). */
+  private encodeUserPathSegment(userId: string): string {
+    return encodeURIComponent(userId);
+  }
+
   constructor() {
     this.client = axios.create({
       baseURL: env.USER_SERVICE_URL || 'http://localhost:4001',
@@ -46,9 +51,12 @@ export class UserServiceClient {
    * Get user by ID
    */
   async getUser(userId: string, adminUserId?: string): Promise<any> {
-    const response = await this.client.get(`/api/v1/users/${userId}`, {
-      headers: adminUserId ? { 'X-User-Id': adminUserId } : {},
-    });
+    const response = await this.client.get(
+      `/api/v1/users/${this.encodeUserPathSegment(userId)}`,
+      {
+        headers: adminUserId ? { 'X-User-Id': adminUserId } : {},
+      },
+    );
     return response.data;
   }
   
@@ -126,9 +134,13 @@ export class UserServiceClient {
    * Update user
    */
   async updateUser(userId: string, updates: any, adminUserId: string): Promise<any> {
-    const response = await this.client.patch(`/api/v1/users/${userId}`, updates, {
-      headers: { 'X-User-Id': adminUserId },
-    });
+    const response = await this.client.patch(
+      `/api/v1/users/${this.encodeUserPathSegment(userId)}`,
+      updates,
+      {
+        headers: { 'X-User-Id': adminUserId },
+      },
+    );
     return response.data;
   }
   
@@ -137,7 +149,7 @@ export class UserServiceClient {
    */
   async banUser(userId: string, reason: string, adminUserId: string): Promise<any> {
     const response = await this.client.post(
-      `/api/v1/users/${userId}/ban`,
+      `/api/v1/users/${this.encodeUserPathSegment(userId)}/ban`,
       { reason },
       { headers: { 'X-User-Id': adminUserId } }
     );
@@ -149,7 +161,7 @@ export class UserServiceClient {
    */
   async unbanUser(userId: string, adminUserId: string): Promise<any> {
     const response = await this.client.post(
-      `/api/v1/users/${userId}/unban`,
+      `/api/v1/users/${this.encodeUserPathSegment(userId)}/unban`,
       {},
       { headers: { 'X-User-Id': adminUserId } }
     );
@@ -161,7 +173,7 @@ export class UserServiceClient {
    */
   async suspendUser(userId: string, reason: string, adminUserId: string): Promise<any> {
     const response = await this.client.post(
-      `/api/v1/users/${userId}/suspend`,
+      `/api/v1/users/${this.encodeUserPathSegment(userId)}/suspend`,
       { reason },
       { headers: { 'X-User-Id': adminUserId } }
     );
@@ -173,7 +185,7 @@ export class UserServiceClient {
    */
   async unsuspendUser(userId: string, adminUserId: string): Promise<any> {
     const response = await this.client.post(
-      `/api/v1/users/${userId}/unsuspend`,
+      `/api/v1/users/${this.encodeUserPathSegment(userId)}/unsuspend`,
       {},
       { headers: { 'X-User-Id': adminUserId } }
     );
