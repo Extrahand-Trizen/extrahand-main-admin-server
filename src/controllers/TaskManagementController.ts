@@ -4,6 +4,7 @@ import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
+import { TaskDeleteRequest } from '../models/TaskDeleteRequest';
 
 type UpstreamPagination = {
   page?: number;
@@ -189,6 +190,14 @@ export class TaskManagementController {
    */
   static async deleteTask(req: Request, res: Response): Promise<void> {
     try {
+      if (!req.admin?.isSuperAdmin) {
+        res.status(403).json({
+          success: false,
+          error: 'Only Super Admin can delete tasks. Please raise a delete request.',
+        });
+        return;
+      }
+
       const { taskId } = req.params;
       const { reason } = req.body;
       
@@ -319,6 +328,296 @@ export class TaskManagementController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update application status',
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/tasks/:taskId/delete-requests
+   * Operations creates a delete request for Super Admin approval.
+   */
+  static async createDeleteRequest(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+      const { reason } = req.body;
+
+      if (!taskId) {
+        res.status(400).json({ success: false, error: 'taskId is required' });
+        return;
+      }
+
+      if (!reason || !String(reason).trim()) {
+        res.status(400).json({ success: false, error: 'Reason is required' });
+        return;
+      }
+
+      if (!req.admin) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
+        return;
+      }
+
+      if (req.admin.isSuperAdmin) {
+        res.status(400).json({ success: false, error: 'Super Admin can delete directly' });
+        return;
+      }
+
+      const existing = await TaskDeleteRequest.findOne({
+        taskId,
+        status: 'pending',
+      });
+      if (existing) {
+        res.status(409).json({
+          success: false,
+          error: 'A pending delete request already exists for this task',
+        });
+        return;
+      }
+
+      const requestDoc = await TaskDeleteRequest.create({
+        taskId,
+        reason: String(reason).trim(),
+        requestedBy: {
+          userId: req.admin.userId,
+          email: req.admin.email,
+          name: req.admin.name,
+        },
+        requestedAt: new Date(),
+      });
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.delete_request`,
+        Resource.TASK,
+        taskId,
+        { reason: String(reason).trim(), requestId: requestDoc.requestId },
+      );
+
+      res.status(201).json({
+        success: true,
+        data: { requestId: requestDoc.requestId },
+      });
+    } catch (error: any) {
+      logger.error('Create task delete request error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create delete request',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/tasks/delete-requests
+   * Super Admin lists delete requests.
+   */
+  static async listDeleteRequests(req: Request, res: Response): Promise<void> {
+    try {
+      const { status = 'pending', page = 1, limit = 20, search } = req.query as any;
+
+      const query: any = {};
+      if (status && status !== 'all') query.status = status;
+      if (search) {
+        query.$or = [
+          { taskId: { $regex: search, $options: 'i' } },
+          { 'requestedBy.email': { $regex: search, $options: 'i' } },
+          { 'requestedBy.name': { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      const skip = (Number(page) - 1) * Number(limit);
+      const [rows, total] = await Promise.all([
+        TaskDeleteRequest.find(query).sort({ requestedAt: -1 }).skip(skip).limit(Number(limit)),
+        TaskDeleteRequest.countDocuments(query),
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          requests: rows,
+          pagination: {
+            page: Number(page),
+            limit: Number(limit),
+            total,
+            pages: Math.ceil(total / Number(limit)),
+          },
+        },
+      });
+    } catch (error: any) {
+      logger.error('List task delete requests error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to list delete requests',
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/tasks/delete-requests/:requestId/approve
+   * Super Admin approves a delete request and deletes the task.
+   */
+  static async approveDeleteRequest(req: Request, res: Response): Promise<void> {
+    try {
+      const { requestId } = req.params;
+      const { decisionNote } = req.body || {};
+
+      const requestDoc = await TaskDeleteRequest.findOne({ requestId });
+      if (!requestDoc) {
+        res.status(404).json({ success: false, error: 'Delete request not found' });
+        return;
+      }
+      if (requestDoc.status !== 'pending') {
+        res.status(400).json({ success: false, error: 'Delete request already decided' });
+        return;
+      }
+
+      // Perform the delete using the existing deleteTask logic requirements.
+      // We must impersonate requester profile so task-service authZ passes.
+      const taskPayload = await taskServiceClient.getTask(requestDoc.taskId);
+      const rawTask = taskPayload?.data ?? taskPayload;
+      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
+      if (!requesterProfileId) {
+        res.status(400).json({ success: false, error: 'Task requester profile missing; cannot delete' });
+        return;
+      }
+
+      await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason, {
+        requesterProfileId,
+      });
+
+      requestDoc.status = 'approved';
+      requestDoc.decidedBy = {
+        userId: req.admin!.userId,
+        email: req.admin!.email,
+        name: req.admin!.name,
+      };
+      requestDoc.decidedAt = new Date();
+      if (decisionNote) requestDoc.decisionNote = String(decisionNote).trim();
+      await requestDoc.save();
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.delete_request.approve`,
+        Resource.TASK,
+        requestDoc.taskId,
+        { requestId, decisionNote: requestDoc.decisionNote },
+      );
+
+      res.json({ success: true, data: { requestId, status: requestDoc.status } });
+    } catch (error: any) {
+      logger.error('Approve task delete request error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to approve delete request',
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/tasks/delete-requests/:requestId/reject
+   * Super Admin rejects a delete request.
+   */
+  static async rejectDeleteRequest(req: Request, res: Response): Promise<void> {
+    try {
+      const { requestId } = req.params;
+      const { decisionNote } = req.body || {};
+
+      const requestDoc = await TaskDeleteRequest.findOne({ requestId });
+      if (!requestDoc) {
+        res.status(404).json({ success: false, error: 'Delete request not found' });
+        return;
+      }
+      if (requestDoc.status !== 'pending') {
+        res.status(400).json({ success: false, error: 'Delete request already decided' });
+        return;
+      }
+
+      requestDoc.status = 'rejected';
+      requestDoc.decidedBy = {
+        userId: req.admin!.userId,
+        email: req.admin!.email,
+        name: req.admin!.name,
+      };
+      requestDoc.decidedAt = new Date();
+      if (decisionNote) requestDoc.decisionNote = String(decisionNote).trim();
+      await requestDoc.save();
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.delete_request.reject`,
+        Resource.TASK,
+        requestDoc.taskId,
+        { requestId, decisionNote: requestDoc.decisionNote },
+      );
+
+      res.json({ success: true, data: { requestId, status: requestDoc.status } });
+    } catch (error: any) {
+      logger.error('Reject task delete request error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to reject delete request',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/tasks/recycle-bin
+   * Super Admin: list soft-deleted tasks.
+   */
+  static async listDeletedTasks(req: Request, res: Response): Promise<void> {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const limit = req.query.limit ? Number(req.query.limit) : 20;
+      const search = (req.query.search as string) || undefined;
+
+      const result = await taskServiceClient.listDeletedTasks({ page, limit, search });
+      const tasks = Array.isArray(result?.data) ? result.data.map(normalizeTask) : [];
+      const pagination = extractPagination(result);
+
+      res.json({
+        success: true,
+        data: tasks,
+        ...(pagination ? { pagination } : {}),
+      });
+    } catch (error: any) {
+      logger.error('List deleted tasks error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to list deleted tasks',
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/tasks/:taskId/restore
+   * Super Admin: restore a soft-deleted task.
+   */
+  static async restoreTask(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+
+      const taskPayload = await taskServiceClient.getTask(taskId);
+      const rawTask = taskPayload?.data ?? taskPayload;
+      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
+      if (!requesterProfileId) {
+        res.status(404).json({ success: false, error: 'Task not found or missing requester for restore' });
+        return;
+      }
+
+      const result = await taskServiceClient.restoreTask(taskId, { requesterProfileId });
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.restore`,
+        Resource.TASK,
+        taskId,
+        {},
+      );
+
+      res.json({ success: true, data: result?.data ?? result });
+    } catch (error: any) {
+      logger.error('Restore task error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to restore task',
       });
     }
   }

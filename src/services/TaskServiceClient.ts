@@ -110,6 +110,20 @@ export class TaskServiceClient {
     });
     return response.data;
   }
+
+  async listDeletedTasks(params?: { page?: number; limit?: number; search?: string }): Promise<any> {
+    const response = await this.client.get('/api/v1/tasks/recycle-bin', { params });
+    return response.data;
+  }
+
+  async restoreTask(taskId: string, opts?: { requesterProfileId?: string }): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (opts?.requesterProfileId) {
+      headers['X-Profile-Id'] = opts.requesterProfileId;
+    }
+    const response = await this.client.post(`/api/v1/tasks/${taskId}/restore`, {}, { headers });
+    return response.data;
+  }
   
   /**
    * Get task applications

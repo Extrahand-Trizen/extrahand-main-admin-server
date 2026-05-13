@@ -185,7 +185,7 @@ export class AdminUserController {
   static async updateUser(req: Request, res: Response): Promise<void> {
     try {
       const { userId } = req.params;
-      const { name, status, password } = req.body;
+      const { name, status, password, role, dashboardType, isSuperAdmin } = req.body;
       
       const user = await AdminUser.findOne({ userId });
       if (!user) {
@@ -207,6 +207,42 @@ export class AdminUserController {
       
       if (name) user.name = name;
       if (status) user.status = status as any;
+      if (typeof isSuperAdmin === 'boolean') {
+        user.isSuperAdmin = isSuperAdmin;
+      }
+
+      // Allow role shift (Super Admin only route already guards this controller).
+      // If dashboardType is not provided, update the first dashboardAccess entry (if any).
+      if (role) {
+        const targetDashboardType: DashboardType | undefined = dashboardType;
+        const access =
+          targetDashboardType
+            ? user.dashboardAccess.find((a) => a.dashboardType === targetDashboardType)
+            : user.dashboardAccess[0];
+        if (!access) {
+          // Create an access record if missing and dashboardType provided.
+          if (targetDashboardType) {
+            const permissions = PermissionService.getRolePermissions(targetDashboardType, role);
+            user.dashboardAccess.push({
+              dashboardType: targetDashboardType,
+              role,
+              status: 'active',
+              permissions,
+              grantedBy: req.admin!.userId,
+              grantedAt: new Date(),
+            } as any);
+          } else {
+            res.status(400).json({
+              success: false,
+              error: 'User has no dashboard access to update. Provide dashboardType.',
+            });
+            return;
+          }
+        } else {
+          access.role = role;
+          access.permissions = PermissionService.getRolePermissions(access.dashboardType, role);
+        }
+      }
       
       if (password) {
         user.passwordHash = await bcrypt.hash(password, 10);

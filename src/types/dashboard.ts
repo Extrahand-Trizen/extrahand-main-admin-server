@@ -2,7 +2,6 @@ export enum DashboardType {
   MAIN_ADMIN = 'main_admin',
   SUPER_ADMIN = 'super_admin',
   LEADS_ONBOARDING = 'leads_onboarding',
-  CONTENT_ADMIN = 'content_admin',
   PAYMENT_ADMIN = 'payment_admin',
 }
 
