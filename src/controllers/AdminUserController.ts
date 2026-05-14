@@ -403,4 +403,52 @@ export class AdminUserController {
       });
     }
   }
+  /**
+   * DELETE /api/v1/admin/users/:userId
+   * Delete admin user (Super Admin only)
+   */
+  static async deleteAdminUser(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+
+      const user = await AdminUser.findOne({ userId });
+      if (!user) {
+        res.status(404).json({
+          success: false,
+          error: 'Admin user not found',
+        });
+        return;
+      }
+
+      // Prevent self-deletion
+      if (user.userId === req.admin!.userId) {
+        res.status(400).json({
+          success: false,
+          error: 'Cannot delete yourself',
+        });
+        return;
+      }
+
+      await AdminUser.deleteOne({ userId });
+
+      await createAuditLog(
+        req,
+        'admin.user.delete',
+        'admin_user',
+        userId,
+        { email: user.email }
+      );
+
+      res.json({
+        success: true,
+        message: 'Admin user deleted successfully',
+      });
+    } catch (error: any) {
+      logger.error('Delete admin user error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete admin user',
+      });
+    }
+  }
 }
