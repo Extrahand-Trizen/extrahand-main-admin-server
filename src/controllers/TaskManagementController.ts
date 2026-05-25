@@ -621,4 +621,57 @@ export class TaskManagementController {
       });
     }
   }
+
+  /**
+   * DELETE /api/v1/tasks/:taskId/permanent
+   * Super Admin: permanently delete a soft-deleted task.
+   */
+  static async permanentlyDeleteTask(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.admin?.isSuperAdmin) {
+        res.status(403).json({
+          success: false,
+          error: 'Only Super Admin can permanently delete tasks.',
+        });
+        return;
+      }
+
+      const { taskId } = req.params;
+      const reason = typeof req.body?.reason === 'string' ? String(req.body.reason).trim() : '';
+
+      const taskPayload = await taskServiceClient.getTask(taskId);
+      const rawTask = taskPayload?.data ?? taskPayload;
+      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
+      if (!requesterProfileId) {
+        res.status(404).json({
+          success: false,
+          error: 'Task not found or missing requester for permanent delete',
+        });
+        return;
+      }
+
+      const result = await taskServiceClient.permanentlyDeleteTask(taskId, {
+        requesterProfileId,
+      });
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.permanent_delete`,
+        Resource.TASK,
+        taskId,
+        reason ? { reason } : {},
+      );
+
+      res.json({
+        success: true,
+        data: result?.data ?? result,
+      });
+    } catch (error: any) {
+      logger.error('Permanent delete task error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to permanently delete task',
+      });
+    }
+  }
 }

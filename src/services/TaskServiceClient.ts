@@ -124,6 +124,20 @@ export class TaskServiceClient {
     const response = await this.client.post(`/api/v1/tasks/${taskId}/restore`, {}, { headers });
     return response.data;
   }
+
+  async permanentlyDeleteTask(
+    taskId: string,
+    opts?: { requesterProfileId?: string }
+  ): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (opts?.requesterProfileId) {
+      headers['X-Profile-Id'] = opts.requesterProfileId;
+    }
+    const response = await this.client.delete(`/api/v1/tasks/${taskId}/permanent`, {
+      headers,
+    });
+    return response.data;
+  }
   
   /**
    * Get task applications

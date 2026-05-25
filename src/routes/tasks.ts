@@ -41,6 +41,12 @@ router.get(
   TaskManagementController.listDeletedTasks
 );
 
+router.delete(
+  '/:taskId/permanent',
+  requireSuperAdmin,
+  TaskManagementController.permanentlyDeleteTask
+);
+
 router.get(
   '/:taskId',
   requirePermission(`${Resource.TASK}.${Action.VIEW}`),
