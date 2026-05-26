@@ -29,6 +29,12 @@ router.post(
 );
 
 router.get(
+  '/:userId/registration-source',
+  requirePermission(`${Resource.USER}.${Action.VIEW}`),
+  UserManagementController.getUserRegistrationSource
+);
+
+router.get(
   '/:userId',
   requirePermission(`${Resource.USER}.${Action.VIEW}`),
   UserManagementController.getUser

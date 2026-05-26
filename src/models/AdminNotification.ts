@@ -11,8 +11,8 @@ export interface AdminNotificationDocument extends Document {
   title: string;
   message: string;
   linkUrl?: string;
-  targetUserId?: string;
   dashboardType: DashboardType;
+  targetAdminUserIds?: string[];
   metadata?: Record<string, any>;
   readBy: NotificationReadEntry[];
   createdAt: Date;
@@ -33,12 +33,12 @@ const AdminNotificationSchema = new Schema<AdminNotificationDocument>(
     title: { type: String, required: true },
     message: { type: String, required: true },
     linkUrl: { type: String },
-    targetUserId: { type: String },
     dashboardType: {
       type: String,
       enum: Object.values(DashboardType),
       required: true,
     },
+    targetAdminUserIds: { type: [String], default: [] },
     metadata: { type: Schema.Types.Mixed },
     readBy: { type: [NotificationReadSchema], default: [] },
   },
@@ -46,7 +46,7 @@ const AdminNotificationSchema = new Schema<AdminNotificationDocument>(
 );
 
 AdminNotificationSchema.index({ dashboardType: 1, createdAt: -1 });
-AdminNotificationSchema.index({ dashboardType: 1, targetUserId: 1, createdAt: -1 });
+AdminNotificationSchema.index({ dashboardType: 1, targetAdminUserIds: 1, createdAt: -1 });
 AdminNotificationSchema.index({ 'readBy.userId': 1 });
 
 export const AdminNotification = mongoose.model<AdminNotificationDocument>(

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import logger from '../config/logger';
 import { env } from '../config/env';
+import { AdminUser } from '../models/AdminUser';
 import { AdminNotification } from '../models/AdminNotification';
 import { DashboardType } from '../types/dashboard';
 
@@ -26,7 +27,7 @@ function buildNotificationPayload(event: NotificationEventPayload) {
       message: event.userName
         ? `${event.userName}'s Aadhaar verification failed.`
         : 'Aadhaar verification failed for a user.',
-      linkUrl: event.userId ? `/users/${event.userId}` : undefined,
+      linkUrl: event.userId ? `/users/${encodeURIComponent(event.userId)}` : undefined,
     };
   }
 
@@ -35,8 +36,42 @@ function buildNotificationPayload(event: NotificationEventPayload) {
     message: event.taskTitle
       ? `New task posted: ${event.taskTitle}.`
       : 'A new task has been posted.',
-    linkUrl: event.taskId ? `/tasks/${event.taskId}` : undefined,
+    linkUrl: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}` : undefined,
   };
+}
+
+function visibleNotificationsQuery(dashboardType: DashboardType, userId: string) {
+  return {
+    dashboardType,
+    $or: [
+      { targetAdminUserIds: { $exists: false } },
+      { targetAdminUserIds: { $size: 0 } },
+      { targetAdminUserIds: userId },
+    ],
+  };
+}
+
+async function getAlertRecipientUserIds(): Promise<string[]> {
+  const alertEmail = env.ADMIN_ALERT_EMAIL?.trim().toLowerCase();
+  if (!alertEmail) return [];
+
+  const admins = await AdminUser.find({
+    email: alertEmail,
+    status: 'active',
+  })
+    .select('userId dashboardAccess isSuperAdmin')
+    .lean();
+
+  return admins
+    .filter((admin) => {
+      if (admin.isSuperAdmin) return true;
+      return admin.dashboardAccess?.some(
+        (access) =>
+          access.dashboardType === DashboardType.MAIN_ADMIN &&
+          access.status === 'active'
+      );
+    })
+    .map((admin) => admin.userId);
 }
 
 async function sendAdminAlertEmail(notification: {
@@ -103,10 +138,10 @@ export class NotificationController {
       const dashboardType = req.admin.dashboardType as DashboardType;
       const userId = req.admin.userId;
 
-      const baseQuery: Record<string, any> = { dashboardType };
-      if (env.ADMIN_NOTIFICATION_USER_ID) {
-        baseQuery.targetUserId = env.ADMIN_NOTIFICATION_USER_ID;
-      }
+      const baseQuery: Record<string, any> = visibleNotificationsQuery(
+        dashboardType,
+        userId
+      );
       if (unreadOnly) {
         baseQuery['readBy.userId'] = { $ne: userId };
       }
@@ -117,10 +152,7 @@ export class NotificationController {
           .limit(limit)
           .lean(),
         AdminNotification.countDocuments({
-          dashboardType,
-          ...(env.ADMIN_NOTIFICATION_USER_ID
-            ? { targetUserId: env.ADMIN_NOTIFICATION_USER_ID }
-            : {}),
+          ...visibleNotificationsQuery(dashboardType, userId),
           'readBy.userId': { $ne: userId },
         }),
       ]);
@@ -165,9 +197,14 @@ export class NotificationController {
 
       const { notificationId } = req.params;
       const userId = req.admin.userId;
+      const dashboardType = req.admin.dashboardType as DashboardType;
 
       await AdminNotification.updateOne(
-        { _id: notificationId, 'readBy.userId': { $ne: userId } },
+        {
+          _id: notificationId,
+          ...visibleNotificationsQuery(dashboardType, userId),
+          'readBy.userId': { $ne: userId },
+        },
         { $push: { readBy: { userId, readAt: new Date() } } }
       );
 
@@ -195,7 +232,10 @@ export class NotificationController {
       const dashboardType = req.admin.dashboardType as DashboardType;
 
       await AdminNotification.updateMany(
-        { dashboardType, 'readBy.userId': { $ne: userId } },
+        {
+          ...visibleNotificationsQuery(dashboardType, userId),
+          'readBy.userId': { $ne: userId },
+        },
         { $push: { readBy: { userId, readAt: new Date() } } }
       );
 
@@ -228,13 +268,21 @@ export class NotificationController {
 
     try {
       const notification = buildNotificationPayload(payload);
+      const targetAdminUserIds = await getAlertRecipientUserIds();
+      if (targetAdminUserIds.length === 0) {
+        logger.warn(
+          'No active main-admin recipient found for admin alert email; notification will be dashboard-wide',
+          { alertEmail: env.ADMIN_ALERT_EMAIL }
+        );
+      }
+
       const created = await AdminNotification.create({
         type: payload.type,
         title: notification.title,
         message: notification.message,
         linkUrl: notification.linkUrl,
-        targetUserId: env.ADMIN_NOTIFICATION_USER_ID || undefined,
         dashboardType: DashboardType.MAIN_ADMIN,
+        targetAdminUserIds,
         metadata: {
           userId: payload.userId,
           userName: payload.userName,

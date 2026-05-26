@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { userServiceClient } from '../services/UserServiceClient';
+import { onboardingServiceClient } from '../services/OnboardingServiceClient';
+import { lookupPartnerLeadSource, PartnerLeadSource } from '../services/PartnerLeadSourceService';
 import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
@@ -90,6 +92,91 @@ export class UserManagementController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get user',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/users/:userId/registration-source
+   * Returns partner portal vs self-registered information.
+   */
+  static async getUserRegistrationSource(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+
+      const userResult = await userServiceClient.getUser(userId, req.admin?.userId);
+      const user = userResult?.data || userResult;
+
+      const email = user?.email as string | undefined;
+      const phone = user?.phone as string | undefined;
+      const uid = (user?.uid || user?.userId || userId) as string | undefined;
+
+      if (!uid && !email && !phone) {
+        res.json({
+          success: true,
+          data: {
+            source: 'self_registered',
+            addedByName: null,
+            leadId: null,
+          },
+        });
+        return;
+      }
+
+      let lead: PartnerLeadSource | null = null;
+
+      if (onboardingServiceClient.isEnabled()) {
+        try {
+          const lookup = await onboardingServiceClient.lookupLeadByContact({
+            uid,
+            email,
+            phone,
+            adminUserId: req.admin?.userId,
+          });
+
+          const serviceLead = lookup?.data?.lead || null;
+          if (lookup?.data?.exists && serviceLead?.leadId) {
+            lead = {
+              leadId: serviceLead.leadId,
+              addedBy: serviceLead.addedBy,
+              addedByName: serviceLead.addedByName || null,
+              source: serviceLead.source || null,
+              createdAt: serviceLead.createdAt,
+              updatedAt: serviceLead.updatedAt,
+            };
+          }
+        } catch (lookupError: any) {
+          logger.warn('Onboarding service lead source lookup failed; falling back to local leads collection', {
+            userId,
+            error: lookupError.message,
+          });
+        }
+      }
+
+      if (!lead) {
+        try {
+          lead = await lookupPartnerLeadSource({ uid, email, phone });
+        } catch (lookupError: any) {
+          logger.warn('Local leads collection source lookup failed', {
+            userId,
+            error: lookupError.message,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          source: lead ? 'partner_portal' : 'self_registered',
+          addedByName: lead?.addedByName || null,
+          leadId: lead?.leadId || null,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Get user registration source error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to get registration source',
       });
     }
   }
