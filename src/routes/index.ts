@@ -9,6 +9,7 @@ import analyticsRoutes from './analytics';
 import applicationRoutes from './applications';
 import paymentRoutes from './payments';
 import notificationRoutes from './notifications';
+import taskCallRoutes from './taskCalls';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.use(`${API_PREFIX}/support`, supportRoutes);
 router.use(`${API_PREFIX}/analytics`, analyticsRoutes);
 router.use(`${API_PREFIX}/payments`, paymentRoutes);
 router.use(`${API_PREFIX}/notifications`, notificationRoutes);
+router.use(`${API_PREFIX}/task-calls`, taskCallRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
