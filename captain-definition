@@ -41,8 +41,7 @@
     "ONBOARDING_SERVICE_URL": "http://srv-captain--extrahand-admin-service:4008",
     "TASK_SERVICE_URL": "http://srv-captain--extrahand-task-service:4002",
     "SUPPORT_SERVICE_URL": "http://srv-captain--extrahand-platform-support-service:5002",
-    "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE",
-    "ADMIN_ALERT_EMAIL": "asishvenkat.a2004@gmail.com"
+    "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE"
   },
   "volumes": [
     {

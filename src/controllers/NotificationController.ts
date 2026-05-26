@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import axios from 'axios';
 import logger from '../config/logger';
 import { env } from '../config/env';
 import { AdminUser } from '../models/AdminUser';
@@ -51,72 +50,26 @@ function visibleNotificationsQuery(dashboardType: DashboardType, userId: string)
   };
 }
 
-async function getAlertRecipientUserIds(): Promise<string[]> {
-  const alertEmail = env.ADMIN_ALERT_EMAIL?.trim().toLowerCase();
-  if (!alertEmail) return [];
-
+async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
   const admins = await AdminUser.find({
-    email: alertEmail,
     status: 'active',
+    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
+    'dashboardAccess.status': 'active',
+    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
   })
     .select('userId dashboardAccess isSuperAdmin')
     .lean();
 
   return admins
-    .filter((admin) => {
-      if (admin.isSuperAdmin) return true;
-      return admin.dashboardAccess?.some(
+    .filter((admin) =>
+      admin.dashboardAccess?.some(
         (access) =>
           access.dashboardType === DashboardType.MAIN_ADMIN &&
-          access.status === 'active'
-      );
-    })
+          access.status === 'active' &&
+          ['operations_admin', 'operation_admin'].includes(access.role)
+      )
+    )
     .map((admin) => admin.userId);
-}
-
-async function sendAdminAlertEmail(notification: {
-  title: string;
-  message: string;
-  linkUrl?: string;
-  metadata?: Record<string, any>;
-}) {
-  if (!env.EMAIL_SERVICE_URL) {
-    logger.warn('Email service URL not configured; skipping admin alert email');
-    return;
-  }
-
-  const emailServiceAuthToken = env.EMAIL_SERVICE_AUTH_TOKEN || env.SERVICE_AUTH_TOKEN;
-  const to = env.ADMIN_ALERT_EMAIL;
-
-  try {
-    await axios.post(
-      `${env.EMAIL_SERVICE_URL}/api/v1/email/send`,
-      {
-        to,
-        template: 'admin_alert',
-        data: {
-          title: notification.title,
-          message: notification.message,
-          linkUrl: notification.linkUrl,
-          metadata: notification.metadata,
-        },
-        metadata: {
-          notificationCategory: 'system',
-          type: 'admin_alert',
-        },
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Service-Auth': emailServiceAuthToken,
-        },
-      }
-    );
-  } catch (error: any) {
-    logger.error('Failed to send admin alert email', {
-      error: error.message,
-    });
-  }
 }
 
 export class NotificationController {
@@ -268,15 +221,14 @@ export class NotificationController {
 
     try {
       const notification = buildNotificationPayload(payload);
-      const targetAdminUserIds = await getAlertRecipientUserIds();
+      const targetAdminUserIds = await getOperationsAdminRecipientUserIds();
       if (targetAdminUserIds.length === 0) {
         logger.warn(
-          'No active main-admin recipient found for admin alert email; notification will be dashboard-wide',
-          { alertEmail: env.ADMIN_ALERT_EMAIL }
+          'No active operations_admin users found for main-admin notification; notification will be dashboard-wide'
         );
       }
 
-      const created = await AdminNotification.create({
+      await AdminNotification.create({
         type: payload.type,
         title: notification.title,
         message: notification.message,
@@ -291,13 +243,6 @@ export class NotificationController {
           taskTitle: payload.taskTitle,
           occurredAt: payload.occurredAt,
         },
-      });
-
-      await sendAdminAlertEmail({
-        title: notification.title,
-        message: notification.message,
-        linkUrl: notification.linkUrl,
-        metadata: created.metadata as Record<string, any>,
       });
 
       res.json({ success: true });
