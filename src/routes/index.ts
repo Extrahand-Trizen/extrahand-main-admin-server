@@ -8,6 +8,7 @@ import supportRoutes from './support';
 import analyticsRoutes from './analytics';
 import applicationRoutes from './applications';
 import paymentRoutes from './payments';
+import notificationRoutes from './notifications';
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.use(`${API_PREFIX}/invites`, inviteRoutes);
 router.use(`${API_PREFIX}/support`, supportRoutes);
 router.use(`${API_PREFIX}/analytics`, analyticsRoutes);
 router.use(`${API_PREFIX}/payments`, paymentRoutes);
+router.use(`${API_PREFIX}/notifications`, notificationRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
