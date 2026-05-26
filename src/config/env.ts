@@ -37,6 +37,7 @@ const envSchema = z.object({
   EMAIL_SERVICE_URL: z.string().url().optional(),
   EMAIL_SERVICE_AUTH_TOKEN: z.string().min(32).optional(),
   ADMIN_ALERT_EMAIL: z.string().email().default('asishvenkat.a2004@gmail.com'),
+  ADMIN_NOTIFICATION_USER_ID: z.string().optional(),
   
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 });

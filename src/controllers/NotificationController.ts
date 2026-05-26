@@ -104,6 +104,9 @@ export class NotificationController {
       const userId = req.admin.userId;
 
       const baseQuery: Record<string, any> = { dashboardType };
+      if (env.ADMIN_NOTIFICATION_USER_ID) {
+        baseQuery.targetUserId = env.ADMIN_NOTIFICATION_USER_ID;
+      }
       if (unreadOnly) {
         baseQuery['readBy.userId'] = { $ne: userId };
       }
@@ -115,6 +118,9 @@ export class NotificationController {
           .lean(),
         AdminNotification.countDocuments({
           dashboardType,
+          ...(env.ADMIN_NOTIFICATION_USER_ID
+            ? { targetUserId: env.ADMIN_NOTIFICATION_USER_ID }
+            : {}),
           'readBy.userId': { $ne: userId },
         }),
       ]);
@@ -227,6 +233,7 @@ export class NotificationController {
         title: notification.title,
         message: notification.message,
         linkUrl: notification.linkUrl,
+        targetUserId: env.ADMIN_NOTIFICATION_USER_ID || undefined,
         dashboardType: DashboardType.MAIN_ADMIN,
         metadata: {
           userId: payload.userId,
