@@ -14,6 +14,11 @@ const STATUSES: TaskCallStatus[] = [
   'follow_up',
 ];
 
+const TASK_CALL_EXCLUDED_EMAILS = [
+  'nukaraju@trizenventures.com',
+  'asishvenkat.a2004@gmail.com',
+];
+
 function isOperationsAdmin(req: Request): boolean {
   return ['operations_admin', 'operation_admin', 'operations'].includes(
     req.admin?.role || '',
@@ -64,7 +69,12 @@ function normalizeProfile(profile: any): any {
   return {
     id: profile?.profileId || profile?._id || profile?.id || profile?.uid,
     name: profile?.name || profile?.displayName || profile?.fullName || 'Unknown',
-    phone: profile?.phone || profile?.phoneNumber || profile?.mobile || profile?.contactNumber || '',
+    phone:
+      profile?.phone ||
+      profile?.phoneNumber ||
+      profile?.mobile ||
+      profile?.contactNumber ||
+      '',
   };
 }
 
@@ -72,7 +82,11 @@ async function getTaskMap(taskIds: string[]) {
   if (taskIds.length === 0) return new Map<string, any>();
   try {
     const result = await taskServiceClient.getTasksBatch(taskIds);
-    const rows = Array.isArray(result?.data) ? result.data : [];
+    const rows = Array.isArray(result?.data)
+      ? result.data
+      : Array.isArray(result?.profiles)
+        ? result.profiles
+        : [];
     return new Map(
       rows.map((row: any) => {
         const task = normalizeTask(row);
@@ -117,6 +131,15 @@ export class TaskCallController {
 
     try {
       const userId = req.admin!.userId;
+      if (TASK_CALL_EXCLUDED_EMAILS.includes(req.admin!.email.toLowerCase())) {
+        res.json({
+          success: true,
+          data: [],
+          pagination: { page: 1, limit: 50, total: 0, pages: 1 },
+        });
+        return;
+      }
+
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       const page = Math.max(1, Number(req.query.page) || 1);
       const search = String(req.query.search || '').trim().toLowerCase();
@@ -157,7 +180,7 @@ export class TaskCallController {
             notificationId: String(notification._id),
             taskId,
             userName: profile?.name || notification.metadata?.userName || 'Unknown',
-            phone: profile?.phone || '',
+            phone: profile?.phone || notification.metadata?.userPhone || '',
             taskTitle: task.title || notification.metadata?.taskTitle || 'Task',
             category: task.category || 'Not specified',
             notifiedOn: notification.createdAt,

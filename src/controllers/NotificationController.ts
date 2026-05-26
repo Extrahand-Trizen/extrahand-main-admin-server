@@ -3,6 +3,7 @@ import logger from '../config/logger';
 import { env } from '../config/env';
 import { AdminUser } from '../models/AdminUser';
 import { AdminNotification } from '../models/AdminNotification';
+import { NotificationSequence } from '../models/NotificationSequence';
 import { DashboardType } from '../types/dashboard';
 
 const MAX_LIST_LIMIT = 100;
@@ -14,10 +15,22 @@ type NotificationEventPayload = {
   userId?: string;
   userName?: string;
   userEmail?: string;
+  userPhone?: string;
   taskId?: string;
   taskTitle?: string;
   occurredAt?: string;
 };
+
+const TASK_POSTED_RECIPIENT_EMAILS = [
+  'santhoshu@cognitbotz.com',
+  'durgamshiva@cognitbotz.com',
+  'tadembharat@cognitbotz.com',
+];
+
+const TASK_POSTED_EXCLUDED_EMAILS = [
+  'nukaraju@trizenventures.com',
+  'asishvenkat.a2004@gmail.com',
+];
 
 function buildNotificationPayload(event: NotificationEventPayload) {
   if (event.type === 'aadhaar_verification_failed') {
@@ -72,6 +85,40 @@ async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
     .map((admin) => admin.userId);
 }
 
+async function getNextTaskPostedRecipientUserIds(): Promise<string[]> {
+  const admins = await AdminUser.find({
+    status: 'active',
+    email: { $in: TASK_POSTED_RECIPIENT_EMAILS },
+    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
+    'dashboardAccess.status': 'active',
+    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
+  })
+    .select('userId email dashboardAccess')
+    .lean();
+
+  const activeRecipients = TASK_POSTED_RECIPIENT_EMAILS.map((email) =>
+    admins.find((admin) => admin.email === email),
+  ).filter((admin) =>
+    admin?.dashboardAccess?.some(
+      (access) =>
+        access.dashboardType === DashboardType.MAIN_ADMIN &&
+        access.status === 'active' &&
+        ['operations_admin', 'operation_admin'].includes(access.role),
+    ),
+  );
+
+  if (activeRecipients.length === 0) return [];
+
+  const sequence = await NotificationSequence.findOneAndUpdate(
+    { key: 'task_posted_operations_round_robin' },
+    { $inc: { value: 1 } },
+    { new: false, upsert: true, setDefaultsOnInsert: true },
+  ).lean();
+  const currentValue = sequence?.value || 0;
+  const selected = activeRecipients[currentValue % activeRecipients.length];
+  return selected ? [selected.userId] : [];
+}
+
 export class NotificationController {
   /**
    * GET /api/v1/notifications
@@ -90,11 +137,17 @@ export class NotificationController {
       const unreadOnly = req.query.unreadOnly === 'true';
       const dashboardType = req.admin.dashboardType as DashboardType;
       const userId = req.admin.userId;
+      const isExcludedFromTaskPosted = TASK_POSTED_EXCLUDED_EMAILS.includes(
+        req.admin.email.toLowerCase(),
+      );
 
       const baseQuery: Record<string, any> = visibleNotificationsQuery(
         dashboardType,
         userId
       );
+      if (isExcludedFromTaskPosted) {
+        baseQuery.type = { $ne: 'task_posted' };
+      }
       if (unreadOnly) {
         baseQuery['readBy.userId'] = { $ne: userId };
       }
@@ -106,6 +159,7 @@ export class NotificationController {
           .lean(),
         AdminNotification.countDocuments({
           ...visibleNotificationsQuery(dashboardType, userId),
+          ...(isExcludedFromTaskPosted ? { type: { $ne: 'task_posted' } } : {}),
           'readBy.userId': { $ne: userId },
         }),
       ]);
@@ -221,11 +275,16 @@ export class NotificationController {
 
     try {
       const notification = buildNotificationPayload(payload);
-      const targetAdminUserIds = await getOperationsAdminRecipientUserIds();
+      const targetAdminUserIds =
+        payload.type === 'task_posted'
+          ? await getNextTaskPostedRecipientUserIds()
+          : await getOperationsAdminRecipientUserIds();
       if (targetAdminUserIds.length === 0) {
         logger.warn(
-          'No active operations_admin users found for main-admin notification; notification will be dashboard-wide'
+          'No active target operations_admin users found for main-admin notification; skipping targeted notification',
         );
+        res.json({ success: true, skipped: true });
+        return;
       }
 
       await AdminNotification.create({
@@ -239,6 +298,7 @@ export class NotificationController {
           userId: payload.userId,
           userName: payload.userName,
           userEmail: payload.userEmail,
+          userPhone: payload.userPhone,
           taskId: payload.taskId,
           taskTitle: payload.taskTitle,
           occurredAt: payload.occurredAt,
