@@ -5,6 +5,7 @@ import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import { TaskDeleteRequest } from '../models/TaskDeleteRequest';
+import { TaskCallRecord } from '../models/TaskCallRecord';
 
 type UpstreamPagination = {
   page?: number;
@@ -42,6 +43,59 @@ function normalizeTask(task: any): any {
   };
 }
 
+async function enrichTasksWithTaskCallStatus(tasks: any[]): Promise<any[]> {
+  const taskIds = Array.from(
+    new Set(
+      tasks
+        .map((task) => String(task?.taskId || '').trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (taskIds.length === 0) return tasks;
+
+  const records = await TaskCallRecord.find({ taskId: { $in: taskIds } })
+    .select('taskId status followUpDate updatedAt')
+    .lean();
+  const recordMap = new Map(records.map((record) => [record.taskId, record]));
+
+  return tasks.map((task) => {
+    const record = recordMap.get(String(task.taskId));
+    return {
+      ...task,
+      taskCallStatus: record?.status || 'not_updated',
+      taskCallFollowUpDate: record?.followUpDate || null,
+      taskCallUpdatedAt: record?.updatedAt || null,
+    };
+  });
+}
+
+async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise<any[]> {
+  const maxTasks = 1000;
+  const upstreamLimit = 50;
+  const tasks: any[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const result = await taskServiceClient.listTasks({
+      ...params,
+      page,
+      limit: upstreamLimit,
+    });
+    const rows = Array.isArray(result?.data)
+      ? result.data.map(normalizeTask)
+      : [];
+    tasks.push(...rows);
+
+    const pagination = extractPagination(result);
+    totalPages = pagination?.pages || (rows.length === upstreamLimit ? page + 1 : page);
+    page += 1;
+  } while (page <= totalPages && tasks.length < maxTasks);
+
+  return tasks.slice(0, maxTasks);
+}
+
 function normalizeApplication(application: any): any {
   return {
     ...application,
@@ -62,6 +116,7 @@ export class TaskManagementController {
     try {
       const customerFilter =
         (req.query.customerId as string) || (req.query.CustomerId as string);
+      const followUpStatus = String(req.query.followUpStatus || '').trim();
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined,
@@ -73,16 +128,48 @@ export class TaskManagementController {
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
+
+      if (followUpStatus && followUpStatus !== 'all') {
+        const requestedPage = params.page || 1;
+        const requestedLimit = params.limit || 20;
+        const allTasks = await fetchTasksForLocalFiltering({
+          search: params.search,
+          status: params.status,
+          category: params.category,
+          CustomerId: params.CustomerId,
+          assigneeId: params.assigneeId,
+          sortBy: params.sortBy,
+          sortOrder: params.sortOrder,
+        });
+        const enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
+        const filteredTasks = enrichedTasks.filter(
+          (task) => task.taskCallStatus === followUpStatus,
+        );
+        const start = (requestedPage - 1) * requestedLimit;
+
+        res.json({
+          success: true,
+          data: filteredTasks.slice(start, start + requestedLimit),
+          pagination: {
+            page: requestedPage,
+            limit: requestedLimit,
+            total: filteredTasks.length,
+            pages: Math.max(1, Math.ceil(filteredTasks.length / requestedLimit)),
+          },
+        });
+        return;
+      }
       
       const result = await taskServiceClient.listTasks(params);
       const tasks = Array.isArray(result?.data)
         ? result.data.map(normalizeTask)
         : [];
+      const enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
       const pagination = extractPagination(result);
       
       res.json({
         success: true,
-        data: tasks,
+        data: enrichedTasks,
         ...(pagination ? { pagination } : {}),
       });
     } catch (error: any) {
@@ -139,10 +226,11 @@ export class TaskManagementController {
       
       const result = await taskServiceClient.getTask(taskId);
       const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
+      const [enrichedTask] = await enrichTasksWithTaskCallStatus([normalizedTask]);
       
       res.json({
         success: true,
-        data: normalizedTask,
+        data: enrichedTask,
       });
     } catch (error: any) {
       logger.error('Get task error:', error);

@@ -20,9 +20,14 @@ export class UserManagementController {
         search: req.query.search as string,
         status: req.query.status as string,
         role: req.query.role as string,
+        category: req.query.category as string,
         isAadhaarVerified:
           typeof req.query.isAadhaarVerified === 'string'
             ? req.query.isAadhaarVerified === 'true'
+            : undefined,
+        isCertified:
+          typeof req.query.isCertified === 'string'
+            ? req.query.isCertified === 'true'
             : undefined,
         createdFrom: req.query.createdFrom as string,
         createdTo: req.query.createdTo as string,

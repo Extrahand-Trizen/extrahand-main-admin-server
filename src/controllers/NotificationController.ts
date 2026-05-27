@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import logger from '../config/logger';
-import { env } from '../config/env';
 import { AdminUser } from '../models/AdminUser';
 import { AdminNotification } from '../models/AdminNotification';
 import { NotificationSequence } from '../models/NotificationSequence';
@@ -21,7 +20,18 @@ type NotificationEventPayload = {
   occurredAt?: string;
 };
 
-const TASK_POSTED_RECIPIENT_EMAILS = [
+const TASK_POSTED_RECIPIENT_RULES = [
+  {
+    match: 'washing machine',
+    emails: ['santhoshu@cognitbotz.com'],
+  },
+  {
+    match: 'washroom cleaning',
+    emails: ['tadembharat@cognitbotz.com'],
+  },
+];
+
+const TASK_POSTED_ROUND_ROBIN_EMAILS = [
   'santhoshu@cognitbotz.com',
   'durgamshiva@cognitbotz.com',
   'tadembharat@cognitbotz.com',
@@ -63,6 +73,13 @@ function visibleNotificationsQuery(dashboardType: DashboardType, userId: string)
   };
 }
 
+function normalizeRoutingText(value?: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
   const admins = await AdminUser.find({
     status: 'active',
@@ -85,10 +102,11 @@ async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
     .map((admin) => admin.userId);
 }
 
-async function getNextTaskPostedRecipientUserIds(): Promise<string[]> {
+async function getOperationsAdminRecipientUserIdsByEmail(emails: string[]): Promise<string[]> {
+  const normalizedEmails = emails.map((email) => email.toLowerCase());
   const admins = await AdminUser.find({
     status: 'active',
-    email: { $in: TASK_POSTED_RECIPIENT_EMAILS },
+    email: { $in: normalizedEmails },
     'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
     'dashboardAccess.status': 'active',
     'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
@@ -96,7 +114,31 @@ async function getNextTaskPostedRecipientUserIds(): Promise<string[]> {
     .select('userId email dashboardAccess')
     .lean();
 
-  const activeRecipients = TASK_POSTED_RECIPIENT_EMAILS.map((email) =>
+  return normalizedEmails
+    .map((email) => admins.find((admin) => admin.email === email))
+    .filter((admin) =>
+      admin?.dashboardAccess?.some(
+        (access) =>
+          access.dashboardType === DashboardType.MAIN_ADMIN &&
+          access.status === 'active' &&
+          ['operations_admin', 'operation_admin'].includes(access.role),
+      ),
+    )
+    .map((admin) => admin!.userId);
+}
+
+async function getNextTaskPostedRoundRobinRecipientUserIds(): Promise<string[]> {
+  const admins = await AdminUser.find({
+    status: 'active',
+    email: { $in: TASK_POSTED_ROUND_ROBIN_EMAILS },
+    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
+    'dashboardAccess.status': 'active',
+    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
+  })
+    .select('userId email dashboardAccess')
+    .lean();
+
+  const activeRecipients = TASK_POSTED_ROUND_ROBIN_EMAILS.map((email) =>
     admins.find((admin) => admin.email === email),
   ).filter((admin) =>
     admin?.dashboardAccess?.some(
@@ -117,6 +159,29 @@ async function getNextTaskPostedRecipientUserIds(): Promise<string[]> {
   const currentValue = sequence?.value || 0;
   const selected = activeRecipients[currentValue % activeRecipients.length];
   return selected ? [selected.userId] : [];
+}
+
+async function getTaskPostedRecipientUserIds(
+  payload: NotificationEventPayload,
+): Promise<string[]> {
+  const taskTitle = normalizeRoutingText(payload.taskTitle);
+  const matchedRule = TASK_POSTED_RECIPIENT_RULES.find((rule) =>
+    taskTitle.includes(rule.match),
+  );
+
+  if (matchedRule) {
+    const targetUserIds = await getOperationsAdminRecipientUserIdsByEmail(
+      matchedRule.emails,
+    );
+    if (targetUserIds.length > 0) return targetUserIds;
+
+    logger.warn('No active matching operations admin found for task routing rule', {
+      taskTitle: payload.taskTitle,
+      emails: matchedRule.emails,
+    });
+  }
+
+  return getNextTaskPostedRoundRobinRecipientUserIds();
 }
 
 export class NotificationController {
@@ -277,7 +342,7 @@ export class NotificationController {
       const notification = buildNotificationPayload(payload);
       const targetAdminUserIds =
         payload.type === 'task_posted'
-          ? await getNextTaskPostedRecipientUserIds()
+          ? await getTaskPostedRecipientUserIds(payload)
           : await getOperationsAdminRecipientUserIds();
       if (targetAdminUserIds.length === 0) {
         logger.warn(

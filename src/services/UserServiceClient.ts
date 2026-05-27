@@ -69,7 +69,9 @@ export class UserServiceClient {
     search?: string;
     status?: string;
     role?: string;
+    category?: string;
     isAadhaarVerified?: boolean;
+    isCertified?: boolean;
     createdFrom?: string;
     createdTo?: string;
     sortBy?: string;
