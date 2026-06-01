@@ -10,7 +10,10 @@ import { persistTaskAssignment } from '../services/TaskAssignmentService';
 
 const MAX_LIST_LIMIT = 100;
 
-type NotificationEventType = 'aadhaar_verification_failed' | 'task_posted';
+type NotificationEventType =
+  | 'aadhaar_verification_failed'
+  | 'aadhaar_verification_under_review'
+  | 'task_posted';
 
 type NotificationEventPayload = {
   type: NotificationEventType;
@@ -18,6 +21,8 @@ type NotificationEventPayload = {
   userName?: string;
   userEmail?: string;
   userPhone?: string;
+  status?: string;
+  failureReason?: string;
   taskId?: string;
   taskTitle?: string;
   occurredAt?: string;
@@ -28,8 +33,22 @@ function buildNotificationPayload(event: NotificationEventPayload) {
     return {
       title: 'Aadhaar verification failed',
       message: event.userName
-        ? `${event.userName}'s Aadhaar verification failed.`
+        ? `${event.userName}'s Aadhaar verification failed${
+            event.failureReason ? `: ${event.failureReason}` : '.'
+          }`
         : 'Aadhaar verification failed for a user.',
+      linkUrl: event.userId
+        ? `/users/${encodeURIComponent(event.userId)}?tab=verification`
+        : undefined,
+    };
+  }
+
+  if (event.type === 'aadhaar_verification_under_review') {
+    return {
+      title: 'Aadhaar verification under review',
+      message: event.userName
+        ? `${event.userName}'s Aadhaar verification is under review.`
+        : 'Aadhaar verification is under review for a user.',
       linkUrl: event.userId
         ? `/users/${encodeURIComponent(event.userId)}?tab=verification`
         : undefined,
@@ -292,7 +311,13 @@ export class NotificationController {
       return;
     }
 
-    if (!['aadhaar_verification_failed', 'task_posted'].includes(payload.type)) {
+    if (
+      ![
+        'aadhaar_verification_failed',
+        'aadhaar_verification_under_review',
+        'task_posted',
+      ].includes(payload.type)
+    ) {
       res.status(400).json({ success: false, error: 'Unsupported event type' });
       return;
     }
@@ -343,6 +368,28 @@ export class NotificationController {
         return;
       }
 
+      const existingAadhaarNotification = await AdminNotification.findOne({
+        type: payload.type,
+        dashboardType: DashboardType.MAIN_ADMIN,
+        'metadata.userId': payload.userId,
+        ...(payload.status ? { 'metadata.status': payload.status } : {}),
+      })
+        .select('_id')
+        .lean();
+      if (
+        existingAadhaarNotification &&
+        (payload.type === 'aadhaar_verification_failed' ||
+          payload.type === 'aadhaar_verification_under_review')
+      ) {
+        res.json({
+          success: true,
+          skipped: true,
+          reason: 'aadhaar_notification_already_exists',
+          notificationId: String(existingAadhaarNotification._id),
+        });
+        return;
+      }
+
       await AdminNotification.create({
         type: payload.type,
         title: notification.title,
@@ -355,6 +402,8 @@ export class NotificationController {
           userName: payload.userName,
           userEmail: payload.userEmail,
           userPhone: payload.userPhone,
+          status: payload.status,
+          failureReason: payload.failureReason,
           taskId: payload.taskId,
           taskTitle: payload.taskTitle,
           occurredAt: payload.occurredAt,
