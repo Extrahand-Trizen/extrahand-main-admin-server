@@ -49,7 +49,9 @@ function buildNotificationPayload(event: NotificationEventPayload) {
       message: event.userName
         ? `${event.userName}'s Aadhaar verification failed.`
         : 'Aadhaar verification failed for a user.',
-      linkUrl: event.userId ? `/users/${encodeURIComponent(event.userId)}` : undefined,
+      linkUrl: event.userId
+        ? `/users/${encodeURIComponent(event.userId)}?tab=verification`
+        : undefined,
     };
   }
 

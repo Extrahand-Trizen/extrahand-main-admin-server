@@ -6,6 +6,9 @@ import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import { TaskDeleteRequest } from '../models/TaskDeleteRequest';
 import { TaskCallRecord } from '../models/TaskCallRecord';
+import { AdminNotification } from '../models/AdminNotification';
+import { AdminUser } from '../models/AdminUser';
+import { DashboardType } from '../types/dashboard';
 
 type UpstreamPagination = {
   page?: number;
@@ -70,6 +73,83 @@ async function enrichTasksWithTaskCallStatus(tasks: any[]): Promise<any[]> {
   });
 }
 
+// Map of the 3 known task-assigned operations admin emails to display names
+const TASK_ASSIGNED_EMAIL_TO_NAME: Record<string, string> = {
+  'santhoshu@cognitbotz.com': 'santhosh reddy',
+  'durgamshiva@cognitbotz.com': 'durgamshiva',
+  'tadembharat@cognitbotz.com': 'tadembharath',
+};
+
+const TASK_ASSIGNED_EMAILS = Object.keys(TASK_ASSIGNED_EMAIL_TO_NAME);
+
+async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
+  const taskIds = Array.from(
+    new Set(tasks.map((task) => String(task?.taskId || '').trim()).filter(Boolean)),
+  );
+  if (taskIds.length === 0) return tasks;
+
+  // Find notifications for these task IDs
+  const notifications = await AdminNotification.find({
+    type: 'task_posted',
+    dashboardType: DashboardType.MAIN_ADMIN,
+    'metadata.taskId': { $in: taskIds },
+  })
+    .select('metadata.taskId targetAdminUserIds')
+    .lean();
+
+  // Build map: taskId -> assignedUserIds[]
+  const taskToUserIds = new Map<string, string[]>();
+  for (const notif of notifications) {
+    const tid = String(notif.metadata?.taskId || '').trim();
+    if (tid && notif.targetAdminUserIds?.length) {
+      taskToUserIds.set(tid, notif.targetAdminUserIds);
+    }
+  }
+
+  // Collect all assigned userIds
+  const allUserIds = Array.from(new Set([...taskToUserIds.values()].flat()));
+  if (allUserIds.length === 0) {
+    return tasks.map((task) => ({ ...task, assignedTo: null }));
+  }
+
+  // Look up admin user names for those userIds (limit to the 3 known emails)
+  const adminUsers = await AdminUser.find({
+    userId: { $in: allUserIds },
+    email: { $in: TASK_ASSIGNED_EMAILS },
+  })
+    .select('userId email name')
+    .lean();
+
+  const userIdToInfo = new Map<string, { userId: string; name: string }>();
+  for (const admin of adminUsers) {
+    const displayName = TASK_ASSIGNED_EMAIL_TO_NAME[admin.email] || admin.name;
+    userIdToInfo.set(admin.userId, { userId: admin.userId, name: displayName });
+  }
+
+  return tasks.map((task) => {
+    const tid = String(task?.taskId || '').trim();
+    const assignedUserIds = taskToUserIds.get(tid) || [];
+    const assignedUser = assignedUserIds
+      .map((uid) => userIdToInfo.get(uid))
+      .find(Boolean);
+    return { ...task, assignedTo: assignedUser || null };
+  });
+}
+
+async function resolveAssignedToUserId(nameOrId: string): Promise<string | null> {
+  // Allow filtering by display name or userId
+  const lowerName = nameOrId.toLowerCase().trim();
+  const emailEntry = Object.entries(TASK_ASSIGNED_EMAIL_TO_NAME).find(
+    ([, name]) => name.toLowerCase() === lowerName,
+  );
+  if (emailEntry) {
+    const admin = await AdminUser.findOne({ email: emailEntry[0] }).select('userId').lean();
+    return admin?.userId || null;
+  }
+  // Assume it's a userId directly
+  return nameOrId || null;
+}
+
 async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise<any[]> {
   const maxTasks = 1000;
   const upstreamLimit = 50;
@@ -117,6 +197,14 @@ export class TaskManagementController {
       const customerFilter =
         (req.query.customerId as string) || (req.query.CustomerId as string);
       const followUpStatus = String(req.query.followUpStatus || '').trim();
+      const assignedToParam = String(req.query.assignedTo || '').trim();
+
+      // Resolve assignedTo filter to a userId
+      let assignedToUserId: string | null = null;
+      if (assignedToParam && assignedToParam !== 'all') {
+        assignedToUserId = await resolveAssignedToUserId(assignedToParam);
+      }
+
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined,
@@ -129,7 +217,10 @@ export class TaskManagementController {
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
 
-      if (followUpStatus && followUpStatus !== 'all') {
+      // When assignedTo or followUpStatus filter is set, we need local filtering
+      const needsLocalFilter = (followUpStatus && followUpStatus !== 'all') || assignedToUserId;
+
+      if (needsLocalFilter) {
         const requestedPage = params.page || 1;
         const requestedLimit = params.limit || 20;
         const allTasks = await fetchTasksForLocalFiltering({
@@ -141,20 +232,32 @@ export class TaskManagementController {
           sortBy: params.sortBy,
           sortOrder: params.sortOrder,
         });
-        const enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
-        const filteredTasks = enrichedTasks.filter(
-          (task) => task.taskCallStatus === followUpStatus,
-        );
-        const start = (requestedPage - 1) * requestedLimit;
+        let enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
+        enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
 
+        // Apply followUpStatus filter
+        if (followUpStatus && followUpStatus !== 'all') {
+          enrichedTasks = enrichedTasks.filter(
+            (task) => task.taskCallStatus === followUpStatus,
+          );
+        }
+
+        // Apply assignedTo filter
+        if (assignedToUserId) {
+          enrichedTasks = enrichedTasks.filter(
+            (task) => task.assignedTo?.userId === assignedToUserId,
+          );
+        }
+
+        const start = (requestedPage - 1) * requestedLimit;
         res.json({
           success: true,
-          data: filteredTasks.slice(start, start + requestedLimit),
+          data: enrichedTasks.slice(start, start + requestedLimit),
           pagination: {
             page: requestedPage,
             limit: requestedLimit,
-            total: filteredTasks.length,
-            pages: Math.max(1, Math.ceil(filteredTasks.length / requestedLimit)),
+            total: enrichedTasks.length,
+            pages: Math.max(1, Math.ceil(enrichedTasks.length / requestedLimit)),
           },
         });
         return;
@@ -164,7 +267,8 @@ export class TaskManagementController {
       const tasks = Array.isArray(result?.data)
         ? result.data.map(normalizeTask)
         : [];
-      const enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
+      let enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
+      enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
       const pagination = extractPagination(result);
       
       res.json({
