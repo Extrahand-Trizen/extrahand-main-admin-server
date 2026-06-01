@@ -6,6 +6,7 @@ import { DashboardType } from '../types/dashboard';
 import { normalizeTaskIdForAssignment } from '../constants/taskAssignment';
 import { visibleNotificationsQuery } from '../utils/notificationVisibility';
 import { getNextTaskPostedRecipient } from '../services/TaskPostedRecipientService';
+import { persistTaskAssignment } from '../services/TaskAssignmentService';
 
 const MAX_LIST_LIMIT = 100;
 
@@ -71,18 +72,28 @@ export async function createTaskPostedAdminNotification(
     NotificationEventPayload,
     'taskId' | 'taskTitle' | 'userId' | 'userName' | 'userEmail' | 'userPhone' | 'occurredAt'
   >,
-): Promise<{ created: boolean; targetAdminUserIds: string[] }> {
+): Promise<{
+  created: boolean;
+  targetAdminUserIds: string[];
+  notificationId?: string;
+  taskId?: string;
+  assignedTo?: { userId: string; email: string; name: string };
+}> {
   const notification = buildNotificationPayload({ type: 'task_posted', ...payload });
   const recipient = await getNextTaskPostedRecipient();
 
   if (!recipient) {
+    logger.warn('[TaskPostedInAppNotification][main-admin-server] No ops recipient for round-robin', {
+      taskId: payload.taskId,
+      taskTitle: payload.taskTitle,
+    });
     return { created: false, targetAdminUserIds: [] };
   }
 
   const taskId = normalizeTaskIdForAssignment(payload.taskId);
   const targetAdminUserIds = [recipient.userId];
 
-  await AdminNotification.create({
+  const createdNotification = await AdminNotification.create({
     type: 'task_posted',
     title: notification.title,
     message: notification.message,
@@ -103,7 +114,37 @@ export async function createTaskPostedAdminNotification(
     },
   });
 
-  return { created: true, targetAdminUserIds };
+  const notificationId = String(createdNotification._id);
+
+  await persistTaskAssignment({
+    taskId,
+    taskTitle: payload.taskTitle,
+    recipient,
+    notificationId,
+  });
+
+  logger.info('[TaskPostedInAppNotification][main-admin-server] In-app notification saved after task posted', {
+    service: 'extrahand-main-admin-server',
+    notificationId,
+    taskId,
+    taskTitle: payload.taskTitle,
+    assignedToUserId: recipient.userId,
+    assignedToEmail: recipient.email,
+    assignedToName: recipient.name,
+    targetAdminUserIds,
+    collections: {
+      inAppNotification: 'adminnotifications',
+      taskAssignment: 'task_assignments',
+    },
+  });
+
+  return {
+    created: true,
+    targetAdminUserIds,
+    notificationId,
+    taskId,
+    assignedTo: recipient,
+  };
 }
 
 export class NotificationController {
@@ -257,22 +298,36 @@ export class NotificationController {
 
     try {
       if (payload.type === 'task_posted') {
+        logger.info('[TaskPostedInAppNotification][main-admin-server] Received task_posted event from task-service', {
+          service: 'extrahand-main-admin-server',
+          taskId: payload.taskId,
+          taskTitle: payload.taskTitle,
+        });
+
         const result = await createTaskPostedAdminNotification(payload);
         if (!result.created) {
           logger.warn(
-            'No active target operations_admin users found for main-admin notification; skipping targeted notification',
-            { eventType: payload.type, taskId: payload.taskId, taskTitle: payload.taskTitle },
+            '[TaskPostedInAppNotification][main-admin-server] Notification skipped — no active ops assignee',
+            {
+              service: 'extrahand-main-admin-server',
+              eventType: payload.type,
+              taskId: payload.taskId,
+              taskTitle: payload.taskTitle,
+            },
           );
-          res.json({ success: true, skipped: true });
+          res.json({ success: true, skipped: true, reason: 'no_active_ops_recipient' });
           return;
         }
 
-        logger.info('Creating main-admin notification', {
-          eventType: payload.type,
-          taskId: payload.taskId,
-          targetAdminUserIds: result.targetAdminUserIds,
+        res.json({
+          success: true,
+          data: {
+            notificationId: result.notificationId,
+            taskId: result.taskId,
+            assignedTo: result.assignedTo,
+            targetAdminUserIds: result.targetAdminUserIds,
+          },
         });
-        res.json({ success: true });
         return;
       }
 

@@ -29,7 +29,7 @@
     "PORT": "4007",
     "LOG_LEVEL": "info",
     "MONGODB_URI": "YOUR_MONGODB_URI_HERE",
-    "MONGODB_DB": "extrahand",
+    "MONGO_DB": "extrahand",
     "JWT_SECRET": "YOUR_JWT_SECRET_HERE",
     "JWT_REFRESH_SECRET": "YOUR_JWT_REFRESH_SECRET_HERE",
     "JWT_ACCESS_EXPIRY": "15m",

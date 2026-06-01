@@ -17,6 +17,7 @@ import {
 import { createTaskPostedAdminNotification } from './NotificationController';
 import {
   loadTaskAssignmentMap,
+  persistTaskAssignment,
   resolveAssigneeFilter,
   resolveAssigneeFilterUserId,
   taskMatchesAssigneeFilter,
@@ -711,6 +712,72 @@ export class TaskManagementController {
   }
 
   /**
+   * GET /api/v1/tasks/assignments/status
+   * Super Admin: diagnose task assignment + notification pipeline.
+   */
+  static async getAssignmentStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const { listTaskPostedRecipients } = await import(
+        '../services/TaskPostedRecipientService'
+      );
+      const { TaskAssignment } = await import('../models/TaskAssignment');
+      const { NotificationSequence } = await import('../models/NotificationSequence');
+
+      const activeRecipients = await listTaskPostedRecipients();
+      const [notificationCount, assignmentCount, latestNotifications, sequence] =
+        await Promise.all([
+          AdminNotification.countDocuments({ type: 'task_posted' }),
+          TaskAssignment.countDocuments({}),
+          AdminNotification.find({ type: 'task_posted' })
+            .sort({ createdAt: -1 })
+            .limit(3)
+            .select('createdAt metadata.taskId targetAdminUserIds metadata.assignedToName')
+            .lean(),
+          NotificationSequence.findOne({
+            key: 'task_posted_operations_round_robin',
+          }).lean(),
+        ]);
+
+      const opsAdmins = await AdminUser.find({
+        email: {
+          $in: [
+            'santhoshu@cognitbotz.com',
+            'durgamshiva@cognitbotz.com',
+            'tadembharat@cognitbotz.com',
+          ],
+        },
+      })
+        .select('userId email status dashboardAccess')
+        .lean();
+
+      res.json({
+        success: true,
+        data: {
+          roundRobinReady: activeRecipients.length > 0,
+          activeRecipients,
+          notificationCount,
+          assignmentCount,
+          roundRobinSequence: sequence?.value ?? 0,
+          latestNotifications,
+          opsAdmins,
+          collections: {
+            inAppNotifications: 'adminnotifications',
+            taskAssignments: 'task_assignments',
+            adminUsers: 'admin_users',
+            roundRobin: 'notificationsequences',
+          },
+        },
+      });
+    } catch (error: any) {
+      logger.error('Assignment status error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to load assignment status',
+      });
+    }
+  }
+
+  /**
    * POST /api/v1/tasks/assignments/backfill
    * Super Admin: create missing task_posted notifications for open tasks (round-robin).
    */
@@ -752,17 +819,27 @@ export class TaskManagementController {
         if (!admin) continue;
 
         const email = normalizeAdminEmail(admin.email);
+        const normalizedTaskId = normalizeTaskIdForAssignment(meta?.taskId);
+        const displayName = resolveAssignedDisplayName(email, admin.name);
+
         await AdminNotification.updateOne(
           { _id: row._id },
           {
             $set: {
-              'metadata.taskId': normalizeTaskIdForAssignment(meta?.taskId),
+              'metadata.taskId': normalizedTaskId,
               'metadata.assignedToUserId': admin.userId,
               'metadata.assignedToEmail': email,
-              'metadata.assignedToName': resolveAssignedDisplayName(email, admin.name),
+              'metadata.assignedToName': displayName,
             },
           },
         );
+
+        await persistTaskAssignment({
+          taskId: normalizedTaskId,
+          taskTitle: String(meta?.taskTitle || ''),
+          recipient: { userId: admin.userId, email, name: displayName },
+          notificationId: String(row._id),
+        });
         patched += 1;
       }
 

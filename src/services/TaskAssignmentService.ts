@@ -1,5 +1,8 @@
+import logger from '../config/logger';
 import { AdminNotification } from '../models/AdminNotification';
 import { AdminUser } from '../models/AdminUser';
+import { TaskAssignment } from '../models/TaskAssignment';
+import type { TaskPostedRecipient } from './TaskPostedRecipientService';
 import { DashboardType } from '../types/dashboard';
 import {
   TASK_ASSIGNED_EMAIL_TO_NAME,
@@ -45,9 +48,42 @@ function assigneeFromMetadata(
   };
 }
 
+export async function persistTaskAssignment(input: {
+  taskId: string;
+  taskTitle?: string;
+  recipient: TaskPostedRecipient;
+  notificationId?: string;
+}): Promise<void> {
+  const taskId = normalizeTaskIdForAssignment(input.taskId);
+  if (!taskId) return;
+
+  await TaskAssignment.findOneAndUpdate(
+    { taskId },
+    {
+      taskId,
+      assignedToUserId: input.recipient.userId,
+      assignedToEmail: input.recipient.email,
+      assignedToName: input.recipient.name,
+      notificationId: input.notificationId,
+      taskTitle: input.taskTitle,
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+
+  logger.info('[TaskPostedInAppNotification][main-admin-server] Task assignment row saved', {
+    service: 'extrahand-main-admin-server',
+    collection: 'task_assignments',
+    taskId,
+    taskTitle: input.taskTitle,
+    assignedToUserId: input.recipient.userId,
+    assignedToEmail: input.recipient.email,
+    assignedToName: input.recipient.name,
+    notificationId: input.notificationId,
+  });
+}
+
 /**
- * Build taskId -> assignee map from task_posted notifications.
- * Uses in-memory id matching so Mongo metadata.taskId type/format mismatches do not break joins.
+ * Build taskId -> assignee map (task_assignments first, then adminnotifications fallback).
  */
 export async function loadTaskAssignmentMap(
   taskIds: string[],
@@ -58,6 +94,28 @@ export async function loadTaskAssignmentMap(
   const map: TaskAssignmentMap = new Map();
 
   if (wanted.size === 0) return map;
+
+  const lookupIds = [
+    ...new Set(taskIds.map((id) => normalizeTaskIdForAssignment(id)).filter(Boolean)),
+  ];
+  const assignmentRows = await TaskAssignment.find({
+    taskId: { $in: lookupIds },
+  })
+    .select('taskId assignedToUserId assignedToEmail assignedToName')
+    .lean();
+
+  for (const row of assignmentRows) {
+    const tid = assignmentKey(row.taskId);
+    if (!tid) continue;
+    map.set(tid, {
+      userId: row.assignedToUserId,
+      email: normalizeAdminEmail(row.assignedToEmail),
+      name: row.assignedToName,
+    });
+  }
+
+  const stillMissing = [...wanted].filter((tid) => !map.has(tid));
+  if (stillMissing.length === 0) return map;
 
   const notifications = await AdminNotification.find({
     type: 'task_posted',
@@ -72,7 +130,7 @@ export async function loadTaskAssignmentMap(
 
   for (const notif of notifications) {
     const tid = assignmentKey(String(notif.metadata?.taskId || ''));
-    if (!tid || !wanted.has(tid)) continue;
+    if (!tid || !stillMissing.includes(tid)) continue;
 
     const fromMeta = assigneeFromMetadata(
       notif.metadata as Record<string, unknown> | undefined,

@@ -14,32 +14,64 @@ export type TaskPostedRecipient = {
   name: string;
 };
 
-export async function getNextTaskPostedRecipient(): Promise<TaskPostedRecipient | null> {
+const OPS_DASHBOARD_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+
+function hasActiveMainAdminOpsAccess(admin: {
+  dashboardAccess?: Array<{
+    dashboardType: string;
+    status: string;
+    role: string;
+  }>;
+}): boolean {
+  return Boolean(
+    admin.dashboardAccess?.some(
+      (access) =>
+        access.dashboardType === DashboardType.MAIN_ADMIN &&
+        access.status === 'active' &&
+        OPS_DASHBOARD_ROLES.includes(access.role),
+    ),
+  );
+}
+
+export async function listTaskPostedRecipients(): Promise<TaskPostedRecipient[]> {
   const admins = await AdminUser.find({
     status: 'active',
     email: { $in: [...TASK_POSTED_ROUND_ROBIN_EMAILS] },
-    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
-    'dashboardAccess.status': 'active',
-    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
   })
     .select('userId email name dashboardAccess')
     .lean();
 
-  const activeRecipients = TASK_POSTED_ROUND_ROBIN_EMAILS.map((email) =>
-    admins.find((admin) => normalizeAdminEmail(admin.email) === normalizeAdminEmail(email)),
-  ).filter((admin) =>
-    admin?.dashboardAccess?.some(
-      (access) =>
-        access.dashboardType === DashboardType.MAIN_ADMIN &&
-        access.status === 'active' &&
-        ['operations_admin', 'operation_admin'].includes(access.role),
-    ),
-  );
+  return TASK_POSTED_ROUND_ROBIN_EMAILS.map((email) => {
+    const admin = admins.find(
+      (row) => normalizeAdminEmail(row.email) === normalizeAdminEmail(email),
+    );
+    if (!admin || !hasActiveMainAdminOpsAccess(admin)) return null;
+    const normalizedEmail = normalizeAdminEmail(admin.email);
+    return {
+      userId: admin.userId,
+      email: normalizedEmail,
+      name: resolveAssignedDisplayName(normalizedEmail, admin.name),
+    };
+  }).filter((row): row is TaskPostedRecipient => Boolean(row));
+}
+
+export async function getNextTaskPostedRecipient(): Promise<TaskPostedRecipient | null> {
+  const activeRecipients = await listTaskPostedRecipients();
 
   if (activeRecipients.length === 0) {
-    logger.warn('No active operations admins found for task_posted round-robin', {
+    const admins = await AdminUser.find({
+      email: { $in: [...TASK_POSTED_ROUND_ROBIN_EMAILS] },
+    })
+      .select('userId email status dashboardAccess')
+      .lean();
+    logger.error('No active operations admins found for task_posted round-robin', {
       expectedEmails: TASK_POSTED_ROUND_ROBIN_EMAILS,
       foundAdminEmails: admins.map((admin) => admin.email),
+      foundAccess: admins.map((admin) => ({
+        email: admin.email,
+        status: admin.status,
+        dashboardAccess: admin.dashboardAccess,
+      })),
     });
     return null;
   }
@@ -52,12 +84,5 @@ export async function getNextTaskPostedRecipient(): Promise<TaskPostedRecipient 
 
   const currentValue = sequence?.value || 0;
   const selected = activeRecipients[currentValue % activeRecipients.length];
-  if (!selected) return null;
-
-  const email = normalizeAdminEmail(selected.email);
-  return {
-    userId: selected.userId,
-    email,
-    name: resolveAssignedDisplayName(email, selected.name),
-  };
+  return selected || null;
 }

@@ -3,6 +3,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// CapRover captain-definition uses MONGODB_DB; app code expects MONGO_DB.
+if (!process.env.MONGO_DB && process.env.MONGODB_DB) {
+  process.env.MONGO_DB = process.env.MONGODB_DB;
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().transform(Number).default('4007'),

@@ -41,6 +41,12 @@ router.get(
   TaskManagementController.listDeletedTasks
 );
 
+router.get(
+  '/assignments/status',
+  requireSuperAdmin,
+  TaskManagementController.getAssignmentStatus
+);
+
 router.post(
   '/assignments/backfill',
   requireSuperAdmin,
