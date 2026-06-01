@@ -69,7 +69,7 @@ async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
     status: 'active',
     'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
     'dashboardAccess.status': 'active',
-    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
+    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin', 'operations'] },
   })
     .select('userId dashboardAccess isSuperAdmin')
     .lean();
@@ -80,7 +80,7 @@ async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
         (access) =>
           access.dashboardType === DashboardType.MAIN_ADMIN &&
           access.status === 'active' &&
-          ['operations_admin', 'operation_admin'].includes(access.role)
+          ['operations_admin', 'operation_admin', 'operations'].includes(access.role)
       )
     )
     .map((admin) => admin.userId);
@@ -381,10 +381,26 @@ export class NotificationController {
         (payload.type === 'aadhaar_verification_failed' ||
           payload.type === 'aadhaar_verification_under_review')
       ) {
+        await AdminNotification.updateOne(
+          { _id: existingAadhaarNotification._id },
+          {
+            $addToSet: {
+              targetAdminUserIds: { $each: targetAdminUserIds },
+            },
+            $set: {
+              'metadata.userName': payload.userName,
+              'metadata.userEmail': payload.userEmail,
+              'metadata.userPhone': payload.userPhone,
+              'metadata.status': payload.status,
+              'metadata.failureReason': payload.failureReason,
+              'metadata.occurredAt': payload.occurredAt,
+            },
+          },
+        );
         res.json({
           success: true,
-          skipped: true,
-          reason: 'aadhaar_notification_already_exists',
+          updated: true,
+          reason: 'aadhaar_notification_already_exists_targets_refreshed',
           notificationId: String(existingAadhaarNotification._id),
         });
         return;
