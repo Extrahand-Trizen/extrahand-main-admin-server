@@ -6,6 +6,136 @@ import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
+import { AdminUser } from '../models/AdminUser';
+import { AdminNotification } from '../models/AdminNotification';
+import { DashboardType } from '../types/dashboard';
+
+const OPERATIONS_ADMIN_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+
+function getAadhaarNotificationType(user: any):
+  | 'aadhaar_verification_failed'
+  | 'aadhaar_verification_under_review'
+  | null {
+  if (user?.isAadhaarVerified) return null;
+  const aadhaarKyc = user?.aadhaarKyc;
+  if (!aadhaarKyc) return null;
+  const statusText = [
+    aadhaarKyc.visibleStatus,
+    aadhaarKyc.internalStatus,
+    aadhaarKyc.status,
+  ]
+    .filter((value) => value !== null && value !== undefined)
+    .join(' ')
+    .toLowerCase();
+
+  if (/(failed|failure|rejected|not verified|not_verified)/.test(statusText)) {
+    return 'aadhaar_verification_failed';
+  }
+  if (/(under[_\s-]?review|review|pending)/.test(statusText)) {
+    return 'aadhaar_verification_under_review';
+  }
+  return null;
+}
+
+async function getAllOperationsAdminUserIds(): Promise<string[]> {
+  const admins = await AdminUser.find({
+    status: 'active',
+    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
+    'dashboardAccess.status': 'active',
+    'dashboardAccess.role': { $in: OPERATIONS_ADMIN_ROLES },
+  })
+    .select('userId dashboardAccess')
+    .lean();
+
+  return admins
+    .filter((admin) =>
+      admin.dashboardAccess?.some(
+        (access) =>
+          access.dashboardType === DashboardType.MAIN_ADMIN &&
+          access.status === 'active' &&
+          OPERATIONS_ADMIN_ROLES.includes(access.role),
+      ),
+    )
+    .map((admin) => admin.userId);
+}
+
+async function ensureAadhaarOpsNotification(user: any): Promise<void> {
+  const type = getAadhaarNotificationType(user);
+  if (!type) return;
+
+  const targetAdminUserIds = await getAllOperationsAdminUserIds();
+  if (targetAdminUserIds.length === 0) {
+    logger.warn('No operations admins found for Aadhaar notification', {
+      userId: user?.userId || user?.uid,
+      type,
+    });
+    return;
+  }
+
+  const userId = String(user?.userId || user?.uid || '').trim();
+  if (!userId) return;
+
+  const status = type === 'aadhaar_verification_failed' ? 'failed' : 'under_review';
+  const title =
+    type === 'aadhaar_verification_failed'
+      ? 'Aadhaar verification failed'
+      : 'Aadhaar verification under review';
+  const message =
+    type === 'aadhaar_verification_failed'
+      ? `${user?.name || 'A user'}'s Aadhaar verification failed${
+          user?.aadhaarKyc?.failureReason ? `: ${user.aadhaarKyc.failureReason}` : '.'
+        }`
+      : `${user?.name || 'A user'}'s Aadhaar verification is under review.`;
+
+  const existing = await AdminNotification.findOne({
+    type,
+    dashboardType: DashboardType.MAIN_ADMIN,
+    'metadata.userId': userId,
+    'metadata.status': status,
+  })
+    .select('_id')
+    .lean();
+
+  if (existing) {
+    await AdminNotification.updateOne(
+      { _id: existing._id },
+      {
+        $addToSet: {
+          targetAdminUserIds: { $each: targetAdminUserIds },
+        },
+        $set: {
+          title,
+          message,
+          linkUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
+          'metadata.userName': user?.name,
+          'metadata.userEmail': user?.email,
+          'metadata.userPhone': user?.phone,
+          'metadata.failureReason': user?.aadhaarKyc?.failureReason,
+          'metadata.occurredAt': new Date().toISOString(),
+        },
+      },
+    );
+    return;
+  }
+
+  await AdminNotification.create({
+    type,
+    title,
+    message,
+    linkUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
+    dashboardType: DashboardType.MAIN_ADMIN,
+    targetAdminUserIds,
+    metadata: {
+      userId,
+      userName: user?.name,
+      userEmail: user?.email,
+      userPhone: user?.phone,
+      status,
+      failureReason: user?.aadhaarKyc?.failureReason,
+      occurredAt: new Date().toISOString(),
+    },
+  });
+}
 
 export class UserManagementController {
   /**
@@ -87,10 +217,12 @@ export class UserManagementController {
       const { userId } = req.params;
       
       const result = await userServiceClient.getUser(userId, req.admin?.userId);
+      const user = result.data || result;
+      await ensureAadhaarOpsNotification(user);
       
       res.json({
         success: true,
-        data: result.data || result,
+        data: user,
       });
     } catch (error: any) {
       logger.error('Get user error:', error);
