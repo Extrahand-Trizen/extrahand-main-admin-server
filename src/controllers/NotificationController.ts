@@ -71,7 +71,7 @@ export async function createTaskPostedAdminNotification(
   payload: Pick<
     NotificationEventPayload,
     'taskId' | 'taskTitle' | 'userId' | 'userName' | 'userEmail' | 'userPhone' | 'occurredAt'
-  >,
+  > & { assignedAt?: Date },
 ): Promise<{
   created: boolean;
   targetAdminUserIds: string[];
@@ -108,6 +108,7 @@ export async function createTaskPostedAdminNotification(
       taskId,
       taskTitle: payload.taskTitle,
       occurredAt: payload.occurredAt,
+      assignedAt: payload.assignedAt || new Date(),
       assignedToUserId: recipient.userId,
       assignedToEmail: recipient.email,
       assignedToName: recipient.name,

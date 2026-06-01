@@ -22,6 +22,7 @@ import {
   resolveAssigneeFilterUserId,
   taskMatchesAssigneeFilter,
 } from '../services/TaskAssignmentService';
+import { TaskAssignment } from '../models/TaskAssignment';
 
 type UpstreamPagination = {
   page?: number;
@@ -92,7 +93,49 @@ function extractTaskId(task: any): string {
 
 async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
   const taskIds = Array.from(new Set(tasks.map(extractTaskId).filter(Boolean)));
-  const assignmentMap = await loadTaskAssignmentMap(taskIds);
+  let assignmentMap = await loadTaskAssignmentMap(taskIds);
+  const missingTasks = tasks.filter((task) => {
+    const tid = extractTaskId(task).toLowerCase();
+    return tid && !assignmentMap.has(tid);
+  });
+
+  if (missingTasks.length > 0) {
+    for (const task of missingTasks.slice(0, 50)) {
+      const taskId = extractTaskId(task);
+      const existingAssignment = await TaskAssignment.findOne({ taskId })
+        .select('taskId')
+        .lean();
+      if (existingAssignment) continue;
+
+      const existingNotification = await AdminNotification.findOne({
+        type: 'task_posted',
+        dashboardType: DashboardType.MAIN_ADMIN,
+        'metadata.taskId': taskId,
+      })
+        .select('_id')
+        .lean();
+      if (existingNotification) continue;
+
+      const result = await createTaskPostedAdminNotification({
+        taskId,
+        taskTitle: task.title,
+        userId: task.CustomerId || task.customerId || task.requesterId,
+        occurredAt: task.createdAt || new Date().toISOString(),
+        assignedAt: new Date(),
+      });
+
+      if (result.assignedTo) {
+        logger.info('[TaskPostedInAppNotification][main-admin-server] Repaired missing task assignment from task list', {
+          taskId,
+          taskTitle: task.title,
+          assignedToEmail: result.assignedTo.email,
+          assignedToName: result.assignedTo.name,
+        });
+      }
+    }
+
+    assignmentMap = await loadTaskAssignmentMap(taskIds);
+  }
 
   return tasks.map((task) => {
     const tid = extractTaskId(task).toLowerCase();
