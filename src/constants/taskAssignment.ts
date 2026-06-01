@@ -30,8 +30,20 @@ export function normalizeTaskIdForAssignment(raw: unknown): string {
   if (typeof raw === 'object' && raw !== null) {
     const oid = (raw as { $oid?: string }).$oid;
     if (oid) return String(oid).trim();
+    const buffer = (raw as { buffer?: Uint8Array; toString?: () => string }).buffer;
+    if (buffer && buffer.length === 12) {
+      return Array.from(buffer)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    }
+    if (typeof (raw as { toString?: () => string }).toString === 'function') {
+      const asString = (raw as { toString: () => string }).toString();
+      if (/^[a-f0-9]{24}$/i.test(asString)) return asString;
+    }
     const id = (raw as { _id?: unknown })._id;
     if (id) return normalizeTaskIdForAssignment(id);
   }
-  return String(raw).trim();
+  const text = String(raw).trim();
+  const hexMatch = text.match(/[a-f0-9]{24}/i);
+  return hexMatch ? hexMatch[0] : text;
 }

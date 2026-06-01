@@ -10,12 +10,17 @@ import { AdminNotification } from '../models/AdminNotification';
 import { AdminUser } from '../models/AdminUser';
 import { DashboardType } from '../types/dashboard';
 import {
-  TASK_ASSIGNED_EMAIL_TO_NAME,
   normalizeAdminEmail,
   normalizeTaskIdForAssignment,
   resolveAssignedDisplayName,
 } from '../constants/taskAssignment';
 import { createTaskPostedAdminNotification } from './NotificationController';
+import {
+  loadTaskAssignmentMap,
+  resolveAssigneeFilter,
+  resolveAssigneeFilterUserId,
+  taskMatchesAssigneeFilter,
+} from '../services/TaskAssignmentService';
 
 type UpstreamPagination = {
   page?: number;
@@ -47,7 +52,7 @@ function normalizeTask(task: any): any {
 
   return {
     ...task,
-    taskId: task?.taskId || task?._id || task?.id,
+    taskId: normalizeTaskIdForAssignment(task?.taskId ?? task?._id ?? task?.id),
     CustomerId: task?.CustomerId || task?.requesterId,
     budget: Number.isFinite(normalizedBudget) ? normalizedBudget : 0,
   };
@@ -86,72 +91,18 @@ function extractTaskId(task: any): string {
 
 async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
   const taskIds = Array.from(new Set(tasks.map(extractTaskId).filter(Boolean)));
-
-  if (taskIds.length === 0) {
-    return tasks.map((task) => ({ ...task, assignedTo: null }));
-  }
-
-  const notifications = await AdminNotification.find({
-    type: 'task_posted',
-    dashboardType: DashboardType.MAIN_ADMIN,
-    'metadata.taskId': { $in: taskIds },
-  })
-    .select('metadata targetAdminUserIds createdAt')
-    .sort({ createdAt: 1 })
-    .lean();
-
-  const taskToUserIds = new Map<string, string[]>();
-  for (const notif of notifications) {
-    const tid = normalizeTaskIdForAssignment(notif.metadata?.taskId);
-    const assigneeId = notif.targetAdminUserIds?.[0];
-    if (tid && assigneeId) {
-      taskToUserIds.set(tid, [assigneeId]);
-    }
-  }
-
-  const allUserIds = Array.from(new Set([...taskToUserIds.values()].flat()));
-  if (allUserIds.length === 0) {
-    return tasks.map((task) => ({ ...task, assignedTo: null }));
-  }
-
-  const adminUsers = await AdminUser.find({ userId: { $in: allUserIds } })
-    .select('userId email name')
-    .lean();
-
-  const userIdToInfo = new Map<string, { userId: string; name: string }>();
-  for (const admin of adminUsers) {
-    userIdToInfo.set(admin.userId, {
-      userId: admin.userId,
-      name: resolveAssignedDisplayName(admin.email, admin.name),
-    });
-  }
+  const assignmentMap = await loadTaskAssignmentMap(taskIds);
 
   return tasks.map((task) => {
-    const tid = extractTaskId(task);
-    const assignedUserId = taskToUserIds.get(tid)?.[0];
-    const assignedUser = assignedUserId ? userIdToInfo.get(assignedUserId) : undefined;
-    return { ...task, assignedTo: assignedUser || null };
+    const tid = extractTaskId(task).toLowerCase();
+    const assignee = assignmentMap.get(tid);
+    return {
+      ...task,
+      assignedTo: assignee
+        ? { userId: assignee.userId, name: assignee.name, email: assignee.email }
+        : null,
+    };
   });
-}
-
-
-
-async function resolveAssignedToUserId(nameOrId: string): Promise<string | null> {
-  // Allow filtering by display name or userId
-  const lowerName = nameOrId.toLowerCase().trim();
-  const emailEntry = Object.entries(TASK_ASSIGNED_EMAIL_TO_NAME).find(
-    ([, name]) => name.toLowerCase() === lowerName,
-  );
-  if (emailEntry) {
-    const admin = await AdminUser.findOne({
-      email: normalizeAdminEmail(emailEntry[0]),
-    })
-      .select('userId')
-      .lean();
-    return admin?.userId || null;
-  }
-  // Assume it's a userId directly
-  return nameOrId || null;
 }
 
 async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise<any[]> {
@@ -202,12 +153,13 @@ export class TaskManagementController {
         (req.query.customerId as string) || (req.query.CustomerId as string);
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
-
-      // Resolve assignedTo filter to a userId
-      let assignedToUserId: string | null = null;
-      if (assignedToParam && assignedToParam !== 'all') {
-        assignedToUserId = await resolveAssignedToUserId(assignedToParam);
-      }
+      const assigneeFilter =
+        assignedToParam && assignedToParam !== 'all'
+          ? resolveAssigneeFilter(assignedToParam)
+          : null;
+      const assigneeFilterUserId = assigneeFilter
+        ? await resolveAssigneeFilterUserId(assigneeFilter)
+        : null;
 
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
@@ -221,8 +173,8 @@ export class TaskManagementController {
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
 
-      // When assignedTo or followUpStatus filter is set, we need local filtering
-      const needsLocalFilter = (followUpStatus && followUpStatus !== 'all') || assignedToUserId;
+      const needsLocalFilter =
+        (followUpStatus && followUpStatus !== 'all') || Boolean(assigneeFilter);
 
       if (needsLocalFilter) {
         const requestedPage = params.page || 1;
@@ -246,10 +198,13 @@ export class TaskManagementController {
           );
         }
 
-        // Apply assignedTo filter
-        if (assignedToUserId) {
-          enrichedTasks = enrichedTasks.filter(
-            (task) => task.assignedTo?.userId === assignedToUserId,
+        if (assigneeFilter) {
+          enrichedTasks = enrichedTasks.filter((task) =>
+            taskMatchesAssigneeFilter(
+              task.assignedTo,
+              assigneeFilter,
+              assigneeFilterUserId,
+            ),
           );
         }
 
@@ -769,24 +724,55 @@ export class TaskManagementController {
         return;
       }
 
-      const existing = await AdminNotification.find({
+      const existingNotifications = await AdminNotification.find({
         type: 'task_posted',
         dashboardType: DashboardType.MAIN_ADMIN,
-        'metadata.taskId': { $in: taskIds },
       })
-        .select('metadata.taskId')
+        .select('metadata targetAdminUserIds')
         .lean();
 
-      const existingTaskIds = new Set(
-        existing.map((row) => normalizeTaskIdForAssignment(row.metadata?.taskId)).filter(Boolean),
-      );
+      const wantedTaskIds = new Set(taskIds.map((id) => id.toLowerCase()));
+      const existingTaskIds = new Set<string>();
+      let patched = 0;
+
+      for (const row of existingNotifications) {
+        const tid = normalizeTaskIdForAssignment(row.metadata?.taskId).toLowerCase();
+        if (!tid || !wantedTaskIds.has(tid)) continue;
+        existingTaskIds.add(tid);
+
+        const meta = row.metadata as Record<string, unknown> | undefined;
+        if (meta?.assignedToEmail && meta?.assignedToName) continue;
+
+        const assigneeUserId = row.targetAdminUserIds?.[0];
+        if (!assigneeUserId) continue;
+
+        const admin = await AdminUser.findOne({ userId: assigneeUserId })
+          .select('userId email name')
+          .lean();
+        if (!admin) continue;
+
+        const email = normalizeAdminEmail(admin.email);
+        await AdminNotification.updateOne(
+          { _id: row._id },
+          {
+            $set: {
+              'metadata.taskId': normalizeTaskIdForAssignment(meta?.taskId),
+              'metadata.assignedToUserId': admin.userId,
+              'metadata.assignedToEmail': email,
+              'metadata.assignedToName': resolveAssignedDisplayName(email, admin.name),
+            },
+          },
+        );
+        patched += 1;
+      }
 
       let created = 0;
       let skipped = 0;
 
       for (const task of allTasks) {
         const taskId = extractTaskId(task);
-        if (!taskId || existingTaskIds.has(taskId)) continue;
+        const taskKey = taskId.toLowerCase();
+        if (!taskId || existingTaskIds.has(taskKey)) continue;
 
         const result = await createTaskPostedAdminNotification({
           taskId,
@@ -796,7 +782,7 @@ export class TaskManagementController {
 
         if (result.created) {
           created += 1;
-          existingTaskIds.add(taskId);
+          existingTaskIds.add(taskKey);
         } else {
           skipped += 1;
         }
@@ -804,7 +790,7 @@ export class TaskManagementController {
 
       res.json({
         success: true,
-        data: { created, skipped, total: allTasks.length },
+        data: { created, patched, skipped, total: allTasks.length },
       });
     } catch (error: any) {
       logger.error('Backfill task assignments error:', error);
