@@ -4,6 +4,11 @@ import { AdminUser } from '../models/AdminUser';
 import { AdminNotification } from '../models/AdminNotification';
 import { NotificationSequence } from '../models/NotificationSequence';
 import { DashboardType } from '../types/dashboard';
+import {
+  TASK_POSTED_ROUND_ROBIN_EMAILS,
+  normalizeAdminEmail,
+} from '../constants/taskAssignment';
+import { visibleNotificationsQuery } from '../utils/notificationVisibility';
 
 const MAX_LIST_LIMIT = 100;
 
@@ -19,28 +24,6 @@ type NotificationEventPayload = {
   taskTitle?: string;
   occurredAt?: string;
 };
-
-const TASK_POSTED_RECIPIENT_RULES = [
-  {
-    match: 'washing machine',
-    emails: ['santhoshu@cognitbotz.com'],
-  },
-  {
-    match: 'washroom cleaning',
-    emails: ['tadembharat@cognitbotz.com'],
-  },
-];
-
-const TASK_POSTED_ROUND_ROBIN_EMAILS = [
-  'santhoshu@cognitbotz.com',
-  'durgamshiva@cognitbotz.com',
-  'tadembharat@cognitbotz.com',
-];
-
-const TASK_POSTED_EXCLUDED_EMAILS = [
-  'nukaraju@trizenventures.com',
-  'asishvenkat.a2004@gmail.com',
-];
 
 function buildNotificationPayload(event: NotificationEventPayload) {
   if (event.type === 'aadhaar_verification_failed') {
@@ -62,24 +45,6 @@ function buildNotificationPayload(event: NotificationEventPayload) {
       : 'A new task has been posted.',
     linkUrl: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}` : undefined,
   };
-}
-
-function visibleNotificationsQuery(dashboardType: DashboardType, userId: string) {
-  return {
-    dashboardType,
-    $or: [
-      { targetAdminUserIds: { $exists: false } },
-      { targetAdminUserIds: { $size: 0 } },
-      { targetAdminUserIds: userId },
-    ],
-  };
-}
-
-function normalizeRoutingText(value?: string): string {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
 }
 
 async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
@@ -104,31 +69,6 @@ async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
     .map((admin) => admin.userId);
 }
 
-async function getOperationsAdminRecipientUserIdsByEmail(emails: string[]): Promise<string[]> {
-  const normalizedEmails = emails.map((email) => email.toLowerCase());
-  const admins = await AdminUser.find({
-    status: 'active',
-    email: { $in: normalizedEmails },
-    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
-    'dashboardAccess.status': 'active',
-    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin'] },
-  })
-    .select('userId email dashboardAccess')
-    .lean();
-
-  return normalizedEmails
-    .map((email) => admins.find((admin) => admin.email === email))
-    .filter((admin) =>
-      admin?.dashboardAccess?.some(
-        (access) =>
-          access.dashboardType === DashboardType.MAIN_ADMIN &&
-          access.status === 'active' &&
-          ['operations_admin', 'operation_admin'].includes(access.role),
-      ),
-    )
-    .map((admin) => admin!.userId);
-}
-
 async function getNextTaskPostedRoundRobinRecipientUserIds(): Promise<string[]> {
   const admins = await AdminUser.find({
     status: 'active',
@@ -141,7 +81,7 @@ async function getNextTaskPostedRoundRobinRecipientUserIds(): Promise<string[]> 
     .lean();
 
   const activeRecipients = TASK_POSTED_ROUND_ROBIN_EMAILS.map((email) =>
-    admins.find((admin) => admin.email === email),
+    admins.find((admin) => normalizeAdminEmail(admin.email) === normalizeAdminEmail(email)),
   ).filter((admin) =>
     admin?.dashboardAccess?.some(
       (access) =>
@@ -151,7 +91,13 @@ async function getNextTaskPostedRoundRobinRecipientUserIds(): Promise<string[]> 
     ),
   );
 
-  if (activeRecipients.length === 0) return [];
+  if (activeRecipients.length === 0) {
+    logger.warn('No active operations admins found for task_posted round-robin', {
+      expectedEmails: TASK_POSTED_ROUND_ROBIN_EMAILS,
+      foundAdminEmails: admins.map((admin) => admin.email),
+    });
+    return [];
+  }
 
   const sequence = await NotificationSequence.findOneAndUpdate(
     { key: 'task_posted_operations_round_robin' },
@@ -163,27 +109,43 @@ async function getNextTaskPostedRoundRobinRecipientUserIds(): Promise<string[]> 
   return selected ? [selected.userId] : [];
 }
 
-async function getTaskPostedRecipientUserIds(
-  payload: NotificationEventPayload,
-): Promise<string[]> {
-  const taskTitle = normalizeRoutingText(payload.taskTitle);
-  const matchedRule = TASK_POSTED_RECIPIENT_RULES.find((rule) =>
-    taskTitle.includes(rule.match),
-  );
+/** task_posted in-app only — one of the 3 ops admins per task, round-robin. */
+async function getTaskPostedRecipientUserIds(): Promise<string[]> {
+  return getNextTaskPostedRoundRobinRecipientUserIds();
+}
 
-  if (matchedRule) {
-    const targetUserIds = await getOperationsAdminRecipientUserIdsByEmail(
-      matchedRule.emails,
-    );
-    if (targetUserIds.length > 0) return targetUserIds;
+export async function createTaskPostedAdminNotification(
+  payload: Pick<
+    NotificationEventPayload,
+    'taskId' | 'taskTitle' | 'userId' | 'userName' | 'userEmail' | 'userPhone' | 'occurredAt'
+  >,
+): Promise<{ created: boolean; targetAdminUserIds: string[] }> {
+  const notification = buildNotificationPayload({ type: 'task_posted', ...payload });
+  const targetAdminUserIds = await getTaskPostedRecipientUserIds();
 
-    logger.warn('No active matching operations admin found for task routing rule', {
-      taskTitle: payload.taskTitle,
-      emails: matchedRule.emails,
-    });
+  if (targetAdminUserIds.length === 0) {
+    return { created: false, targetAdminUserIds: [] };
   }
 
-  return getNextTaskPostedRoundRobinRecipientUserIds();
+  await AdminNotification.create({
+    type: 'task_posted',
+    title: notification.title,
+    message: notification.message,
+    linkUrl: notification.linkUrl,
+    dashboardType: DashboardType.MAIN_ADMIN,
+    targetAdminUserIds,
+    metadata: {
+      userId: payload.userId,
+      userName: payload.userName,
+      userEmail: payload.userEmail,
+      userPhone: payload.userPhone,
+      taskId: payload.taskId,
+      taskTitle: payload.taskTitle,
+      occurredAt: payload.occurredAt,
+    },
+  });
+
+  return { created: true, targetAdminUserIds };
 }
 
 export class NotificationController {
@@ -204,17 +166,13 @@ export class NotificationController {
       const unreadOnly = req.query.unreadOnly === 'true';
       const dashboardType = req.admin.dashboardType as DashboardType;
       const userId = req.admin.userId;
-      const isExcludedFromTaskPosted = TASK_POSTED_EXCLUDED_EMAILS.includes(
-        req.admin.email.toLowerCase(),
+      const visibilityQuery = visibleNotificationsQuery(
+        dashboardType,
+        userId,
+        req.admin.email,
       );
 
-      const baseQuery: Record<string, any> = visibleNotificationsQuery(
-        dashboardType,
-        userId
-      );
-      if (isExcludedFromTaskPosted) {
-        baseQuery.type = { $ne: 'task_posted' };
-      }
+      const baseQuery: Record<string, any> = { ...visibilityQuery };
       if (unreadOnly) {
         baseQuery['readBy.userId'] = { $ne: userId };
       }
@@ -225,8 +183,7 @@ export class NotificationController {
           .limit(limit)
           .lean(),
         AdminNotification.countDocuments({
-          ...visibleNotificationsQuery(dashboardType, userId),
-          ...(isExcludedFromTaskPosted ? { type: { $ne: 'task_posted' } } : {}),
+          ...visibilityQuery,
           'readBy.userId': { $ne: userId },
         }),
       ]);
@@ -276,7 +233,7 @@ export class NotificationController {
       await AdminNotification.updateOne(
         {
           _id: notificationId,
-          ...visibleNotificationsQuery(dashboardType, userId),
+          ...visibleNotificationsQuery(dashboardType, userId, req.admin.email),
           'readBy.userId': { $ne: userId },
         },
         { $push: { readBy: { userId, readAt: new Date() } } }
@@ -307,7 +264,7 @@ export class NotificationController {
 
       await AdminNotification.updateMany(
         {
-          ...visibleNotificationsQuery(dashboardType, userId),
+          ...visibleNotificationsQuery(dashboardType, userId, req.admin.email),
           'readBy.userId': { $ne: userId },
         },
         { $push: { readBy: { userId, readAt: new Date() } } }
@@ -341,14 +298,32 @@ export class NotificationController {
     }
 
     try {
+      if (payload.type === 'task_posted') {
+        const result = await createTaskPostedAdminNotification(payload);
+        if (!result.created) {
+          logger.warn(
+            'No active target operations_admin users found for main-admin notification; skipping targeted notification',
+            { eventType: payload.type, taskId: payload.taskId, taskTitle: payload.taskTitle },
+          );
+          res.json({ success: true, skipped: true });
+          return;
+        }
+
+        logger.info('Creating main-admin notification', {
+          eventType: payload.type,
+          taskId: payload.taskId,
+          targetAdminUserIds: result.targetAdminUserIds,
+        });
+        res.json({ success: true });
+        return;
+      }
+
       const notification = buildNotificationPayload(payload);
-      const targetAdminUserIds =
-        payload.type === 'task_posted'
-          ? await getTaskPostedRecipientUserIds(payload)
-          : await getOperationsAdminRecipientUserIds();
+      const targetAdminUserIds = await getOperationsAdminRecipientUserIds();
       if (targetAdminUserIds.length === 0) {
         logger.warn(
           'No active target operations_admin users found for main-admin notification; skipping targeted notification',
+          { eventType: payload.type },
         );
         res.json({ success: true, skipped: true });
         return;

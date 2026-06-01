@@ -41,6 +41,12 @@ router.get(
   TaskManagementController.listDeletedTasks
 );
 
+router.post(
+  '/assignments/backfill',
+  requireSuperAdmin,
+  TaskManagementController.backfillTaskAssignments
+);
+
 router.delete(
   '/:taskId/permanent',
   requireSuperAdmin,

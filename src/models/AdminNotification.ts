@@ -48,6 +48,7 @@ const AdminNotificationSchema = new Schema<AdminNotificationDocument>(
 AdminNotificationSchema.index({ dashboardType: 1, createdAt: -1 });
 AdminNotificationSchema.index({ dashboardType: 1, targetAdminUserIds: 1, createdAt: -1 });
 AdminNotificationSchema.index({ 'readBy.userId': 1 });
+AdminNotificationSchema.index({ type: 1, dashboardType: 1, 'metadata.taskId': 1 });
 
 export const AdminNotification = mongoose.model<AdminNotificationDocument>(
   'AdminNotification',

@@ -9,6 +9,13 @@ import { TaskCallRecord } from '../models/TaskCallRecord';
 import { AdminNotification } from '../models/AdminNotification';
 import { AdminUser } from '../models/AdminUser';
 import { DashboardType } from '../types/dashboard';
+import {
+  TASK_ASSIGNED_EMAIL_TO_NAME,
+  normalizeAdminEmail,
+  normalizeTaskIdForAssignment,
+  resolveAssignedDisplayName,
+} from '../constants/taskAssignment';
+import { createTaskPostedAdminNotification } from './NotificationController';
 
 type UpstreamPagination = {
   page?: number;
@@ -73,80 +80,56 @@ async function enrichTasksWithTaskCallStatus(tasks: any[]): Promise<any[]> {
   });
 }
 
-// Map of the 3 known task-assigned operations admin emails to display names
-const TASK_ASSIGNED_EMAIL_TO_NAME: Record<string, string> = {
-  'santhoshu@cognitbotz.com': 'santhosh reddy',
-  'durgamshiva@cognitbotz.com': 'durgamshiva',
-  'tadembharat@cognitbotz.com': 'tadembharath',
-};
-
-const TASK_ASSIGNED_EMAILS = Object.keys(TASK_ASSIGNED_EMAIL_TO_NAME);
+function extractTaskId(task: any): string {
+  return normalizeTaskIdForAssignment(task?.taskId ?? task?._id ?? task?.id);
+}
 
 async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
-  // Extract taskId robustly — task service returns _id (ObjectId), normalizeTask maps it to taskId
-  // After JSON round-trip through HTTP, ObjectId may be a string or { $oid: "..." }
-  function extractId(task: any): string {
-    const raw = task?.taskId ?? task?._id ?? task?.id;
-    if (!raw) return '';
-    // Handle EJSON { $oid: "..." } format
-    if (typeof raw === 'object' && raw !== null && raw.$oid) return String(raw.$oid).trim();
-    return String(raw).trim();
+  const taskIds = Array.from(new Set(tasks.map(extractTaskId).filter(Boolean)));
+
+  if (taskIds.length === 0) {
+    return tasks.map((task) => ({ ...task, assignedTo: null }));
   }
 
-  const taskIds = Array.from(
-    new Set(tasks.map(extractId).filter(Boolean)),
-  );
-
-  if (taskIds.length === 0) return tasks.map((task) => ({ ...task, assignedTo: null }));
-
-  logger.debug('[enrichTasksWithAssignedTo] Looking up notifications for taskIds', { count: taskIds.length, sample: taskIds.slice(0, 3) });
-
-  // Find notifications for these task IDs
   const notifications = await AdminNotification.find({
     type: 'task_posted',
     dashboardType: DashboardType.MAIN_ADMIN,
     'metadata.taskId': { $in: taskIds },
   })
-    .select('metadata targetAdminUserIds')
+    .select('metadata targetAdminUserIds createdAt')
+    .sort({ createdAt: 1 })
     .lean();
 
-  logger.debug('[enrichTasksWithAssignedTo] Found notifications', { count: notifications.length });
-
-  // Build map: taskId -> assignedUserIds[]
   const taskToUserIds = new Map<string, string[]>();
   for (const notif of notifications) {
-    const tid = String(notif.metadata?.taskId || '').trim();
-    if (tid && notif.targetAdminUserIds?.length) {
-      taskToUserIds.set(tid, notif.targetAdminUserIds);
+    const tid = normalizeTaskIdForAssignment(notif.metadata?.taskId);
+    const assigneeId = notif.targetAdminUserIds?.[0];
+    if (tid && assigneeId) {
+      taskToUserIds.set(tid, [assigneeId]);
     }
   }
 
-  // Collect all assigned userIds
   const allUserIds = Array.from(new Set([...taskToUserIds.values()].flat()));
   if (allUserIds.length === 0) {
     return tasks.map((task) => ({ ...task, assignedTo: null }));
   }
 
-  // Look up admin user names for those userIds (limit to the 3 known emails)
-  const adminUsers = await AdminUser.find({
-    userId: { $in: allUserIds },
-    email: { $in: TASK_ASSIGNED_EMAILS },
-  })
+  const adminUsers = await AdminUser.find({ userId: { $in: allUserIds } })
     .select('userId email name')
     .lean();
 
   const userIdToInfo = new Map<string, { userId: string; name: string }>();
   for (const admin of adminUsers) {
-    const displayName = TASK_ASSIGNED_EMAIL_TO_NAME[admin.email] || admin.name;
-    userIdToInfo.set(admin.userId, { userId: admin.userId, name: displayName });
+    userIdToInfo.set(admin.userId, {
+      userId: admin.userId,
+      name: resolveAssignedDisplayName(admin.email, admin.name),
+    });
   }
 
   return tasks.map((task) => {
-    const tid = extractId(task);
-    const assignedUserIds = taskToUserIds.get(tid) || [];
-    const assignedUser = assignedUserIds
-      .map((uid) => userIdToInfo.get(uid))
-      .find(Boolean);
+    const tid = extractTaskId(task);
+    const assignedUserId = taskToUserIds.get(tid)?.[0];
+    const assignedUser = assignedUserId ? userIdToInfo.get(assignedUserId) : undefined;
     return { ...task, assignedTo: assignedUser || null };
   });
 }
@@ -160,7 +143,11 @@ async function resolveAssignedToUserId(nameOrId: string): Promise<string | null>
     ([, name]) => name.toLowerCase() === lowerName,
   );
   if (emailEntry) {
-    const admin = await AdminUser.findOne({ email: emailEntry[0] }).select('userId').lean();
+    const admin = await AdminUser.findOne({
+      email: normalizeAdminEmail(emailEntry[0]),
+    })
+      .select('userId')
+      .lean();
     return admin?.userId || null;
   }
   // Assume it's a userId directly
@@ -347,7 +334,8 @@ export class TaskManagementController {
       
       const result = await taskServiceClient.getTask(taskId);
       const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
-      const [enrichedTask] = await enrichTasksWithTaskCallStatus([normalizedTask]);
+      let [enrichedTask] = await enrichTasksWithTaskCallStatus([normalizedTask]);
+      [enrichedTask] = await enrichTasksWithAssignedTo([enrichedTask]);
       
       res.json({
         success: true,
@@ -763,6 +751,66 @@ export class TaskManagementController {
       res.status(500).json({
         success: false,
         error: 'Failed to reject delete request',
+      });
+    }
+  }
+
+  /**
+   * POST /api/v1/tasks/assignments/backfill
+   * Super Admin: create missing task_posted notifications for open tasks (round-robin).
+   */
+  static async backfillTaskAssignments(req: Request, res: Response): Promise<void> {
+    try {
+      const allTasks = await fetchTasksForLocalFiltering({ status: 'open' });
+      const taskIds = allTasks.map(extractTaskId).filter(Boolean);
+
+      if (taskIds.length === 0) {
+        res.json({ success: true, data: { created: 0, skipped: 0, total: 0 } });
+        return;
+      }
+
+      const existing = await AdminNotification.find({
+        type: 'task_posted',
+        dashboardType: DashboardType.MAIN_ADMIN,
+        'metadata.taskId': { $in: taskIds },
+      })
+        .select('metadata.taskId')
+        .lean();
+
+      const existingTaskIds = new Set(
+        existing.map((row) => normalizeTaskIdForAssignment(row.metadata?.taskId)).filter(Boolean),
+      );
+
+      let created = 0;
+      let skipped = 0;
+
+      for (const task of allTasks) {
+        const taskId = extractTaskId(task);
+        if (!taskId || existingTaskIds.has(taskId)) continue;
+
+        const result = await createTaskPostedAdminNotification({
+          taskId,
+          taskTitle: task.title,
+          occurredAt: task.createdAt || new Date().toISOString(),
+        });
+
+        if (result.created) {
+          created += 1;
+          existingTaskIds.add(taskId);
+        } else {
+          skipped += 1;
+        }
+      }
+
+      res.json({
+        success: true,
+        data: { created, skipped, total: allTasks.length },
+      });
+    } catch (error: any) {
+      logger.error('Backfill task assignments error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to backfill task assignments',
       });
     }
   }

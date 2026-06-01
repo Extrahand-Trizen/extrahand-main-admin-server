@@ -41,11 +41,7 @@ function visibleTaskNotificationQuery(userId: string, taskId?: string) {
   const query: Record<string, any> = {
     type: 'task_posted',
     dashboardType: DashboardType.MAIN_ADMIN,
-    $or: [
-      { targetAdminUserIds: { $exists: false } },
-      { targetAdminUserIds: { $size: 0 } },
-      { targetAdminUserIds: userId },
-    ],
+    targetAdminUserIds: userId,
   };
   if (taskId) query['metadata.taskId'] = taskId;
   return query;
