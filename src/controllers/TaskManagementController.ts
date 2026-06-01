@@ -83,10 +83,23 @@ const TASK_ASSIGNED_EMAIL_TO_NAME: Record<string, string> = {
 const TASK_ASSIGNED_EMAILS = Object.keys(TASK_ASSIGNED_EMAIL_TO_NAME);
 
 async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
+  // Extract taskId robustly — task service returns _id (ObjectId), normalizeTask maps it to taskId
+  // After JSON round-trip through HTTP, ObjectId may be a string or { $oid: "..." }
+  function extractId(task: any): string {
+    const raw = task?.taskId ?? task?._id ?? task?.id;
+    if (!raw) return '';
+    // Handle EJSON { $oid: "..." } format
+    if (typeof raw === 'object' && raw !== null && raw.$oid) return String(raw.$oid).trim();
+    return String(raw).trim();
+  }
+
   const taskIds = Array.from(
-    new Set(tasks.map((task) => String(task?.taskId || '').trim()).filter(Boolean)),
+    new Set(tasks.map(extractId).filter(Boolean)),
   );
-  if (taskIds.length === 0) return tasks;
+
+  if (taskIds.length === 0) return tasks.map((task) => ({ ...task, assignedTo: null }));
+
+  logger.debug('[enrichTasksWithAssignedTo] Looking up notifications for taskIds', { count: taskIds.length, sample: taskIds.slice(0, 3) });
 
   // Find notifications for these task IDs
   const notifications = await AdminNotification.find({
@@ -94,8 +107,10 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
     dashboardType: DashboardType.MAIN_ADMIN,
     'metadata.taskId': { $in: taskIds },
   })
-    .select('metadata.taskId targetAdminUserIds')
+    .select('metadata targetAdminUserIds')
     .lean();
+
+  logger.debug('[enrichTasksWithAssignedTo] Found notifications', { count: notifications.length });
 
   // Build map: taskId -> assignedUserIds[]
   const taskToUserIds = new Map<string, string[]>();
@@ -127,7 +142,7 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
   }
 
   return tasks.map((task) => {
-    const tid = String(task?.taskId || '').trim();
+    const tid = extractId(task);
     const assignedUserIds = taskToUserIds.get(tid) || [];
     const assignedUser = assignedUserIds
       .map((uid) => userIdToInfo.get(uid))
@@ -135,6 +150,8 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
     return { ...task, assignedTo: assignedUser || null };
   });
 }
+
+
 
 async function resolveAssignedToUserId(nameOrId: string): Promise<string | null> {
   // Allow filtering by display name or userId
