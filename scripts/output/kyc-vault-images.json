@@ -1,0 +1,254 @@
+[
+  {
+    "key": "aadhaar-ocr/klvhYa0K2nN82IMSkiAtz0oLPIs1/eh_f8e6e48cc0524f2c81d3f37512d73f49/front_8b265429500249c3ae63a01eb05c8d45.jpg",
+    "size": 390422,
+    "lastModified": "2026-06-03T10:01:44.838Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/klvhYa0K2nN82IMSkiAtz0oLPIs1/eh_f8e6e48cc0524f2c81d3f37512d73f49/front_8b265429500249c3ae63a01eb05c8d45.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=97b0254ad201688f701c1a20d0914565b78702074c04fe918254c31803ca7291&X-Amz-SignedHeaders=host",
+    "userId": "klvhYa0K2nN82IMSkiAtz0oLPIs1",
+    "sessionId": "eh_f8e6e48cc0524f2c81d3f37512d73f49",
+    "fileName": "front_8b265429500249c3ae63a01eb05c8d45.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/GXBJ6tzjFreU6Kpgki1lZqcmT9u1/eh_085c01f0af754a778f9ee0412929d5b5/front_79f493872ba64e2699a702d397740cb4.jpg",
+    "size": 20737,
+    "lastModified": "2026-06-03T09:47:02.073Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/GXBJ6tzjFreU6Kpgki1lZqcmT9u1/eh_085c01f0af754a778f9ee0412929d5b5/front_79f493872ba64e2699a702d397740cb4.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=541d382a95d64ec0ccf08d59d636c34acbd33e9548f3e872be272c05dba0f88a&X-Amz-SignedHeaders=host",
+    "userId": "GXBJ6tzjFreU6Kpgki1lZqcmT9u1",
+    "sessionId": "eh_085c01f0af754a778f9ee0412929d5b5",
+    "fileName": "front_79f493872ba64e2699a702d397740cb4.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/doYiDPNYNSSAeSEXyLrJOaO3PDI2/eh_7c05c0fc3ee04fc283adb8ba425a5697/back_c08363ef353f424e8048ee14f2af611e.png",
+    "size": 239591,
+    "lastModified": "2026-06-03T09:44:47.258Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/doYiDPNYNSSAeSEXyLrJOaO3PDI2/eh_7c05c0fc3ee04fc283adb8ba425a5697/back_c08363ef353f424e8048ee14f2af611e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=60aa8be50b58f715ce3cd7993a168f2cbde48a2b31228a6e66a7a2dfa28bc956&X-Amz-SignedHeaders=host",
+    "userId": "doYiDPNYNSSAeSEXyLrJOaO3PDI2",
+    "sessionId": "eh_7c05c0fc3ee04fc283adb8ba425a5697",
+    "fileName": "back_c08363ef353f424e8048ee14f2af611e.png"
+  },
+  {
+    "key": "aadhaar-ocr/doYiDPNYNSSAeSEXyLrJOaO3PDI2/eh_7c05c0fc3ee04fc283adb8ba425a5697/front_a8fea6ffd17e4c1c98743240f301b9ce.png",
+    "size": 180736,
+    "lastModified": "2026-06-03T09:44:42.493Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/doYiDPNYNSSAeSEXyLrJOaO3PDI2/eh_7c05c0fc3ee04fc283adb8ba425a5697/front_a8fea6ffd17e4c1c98743240f301b9ce.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=ca95a1d3d4275e9b1b46592ab1057a54889cf8ab8fbbb0eed8bc2ee61893e24a&X-Amz-SignedHeaders=host",
+    "userId": "doYiDPNYNSSAeSEXyLrJOaO3PDI2",
+    "sessionId": "eh_7c05c0fc3ee04fc283adb8ba425a5697",
+    "fileName": "front_a8fea6ffd17e4c1c98743240f301b9ce.png"
+  },
+  {
+    "key": "aadhaar-ocr/0YP7C5TSlBeIK8Vk6PhGp0XKBRQ2/eh_6e30cbc406594fe49bc1923ae64e9e35/back_96932d9e354f4ed280d582dab942b085.jpg",
+    "size": 672580,
+    "lastModified": "2026-06-03T08:53:49.206Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/0YP7C5TSlBeIK8Vk6PhGp0XKBRQ2/eh_6e30cbc406594fe49bc1923ae64e9e35/back_96932d9e354f4ed280d582dab942b085.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=3b25c411bce07871002769e2e7e012c74e19842e0002d83ace3bccfba786e9a7&X-Amz-SignedHeaders=host",
+    "userId": "0YP7C5TSlBeIK8Vk6PhGp0XKBRQ2",
+    "sessionId": "eh_6e30cbc406594fe49bc1923ae64e9e35",
+    "fileName": "back_96932d9e354f4ed280d582dab942b085.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/0YP7C5TSlBeIK8Vk6PhGp0XKBRQ2/eh_6e30cbc406594fe49bc1923ae64e9e35/front_ae76dcdc111c4f589850818563f42192.jpg",
+    "size": 740097,
+    "lastModified": "2026-06-03T08:53:36.039Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/0YP7C5TSlBeIK8Vk6PhGp0XKBRQ2/eh_6e30cbc406594fe49bc1923ae64e9e35/front_ae76dcdc111c4f589850818563f42192.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=ff3cba006922fd02e952743eb2438aa1cf75af092bde65b1555155ac9d6226b4&X-Amz-SignedHeaders=host",
+    "userId": "0YP7C5TSlBeIK8Vk6PhGp0XKBRQ2",
+    "sessionId": "eh_6e30cbc406594fe49bc1923ae64e9e35",
+    "fileName": "front_ae76dcdc111c4f589850818563f42192.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/GweC5n0dRyTcti9TvqT7E1Liuvg2/eh_ba773afddb014c49a67dc56c7b13e995/back_c5df6ac6601f4d23a92d750ce480d896.jpg",
+    "size": 1010588,
+    "lastModified": "2026-06-03T06:53:46.061Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/GweC5n0dRyTcti9TvqT7E1Liuvg2/eh_ba773afddb014c49a67dc56c7b13e995/back_c5df6ac6601f4d23a92d750ce480d896.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=68e03e355133f8b2a7fd0c9adf75f9bc4045c4342237ce9ef1ba4d9a043e7db6&X-Amz-SignedHeaders=host",
+    "userId": "GweC5n0dRyTcti9TvqT7E1Liuvg2",
+    "sessionId": "eh_ba773afddb014c49a67dc56c7b13e995",
+    "fileName": "back_c5df6ac6601f4d23a92d750ce480d896.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/GweC5n0dRyTcti9TvqT7E1Liuvg2/eh_ba773afddb014c49a67dc56c7b13e995/front_0efb519c6f854a72a41c2ad5598fafe9.jpg",
+    "size": 1100578,
+    "lastModified": "2026-06-03T06:53:32.592Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/GweC5n0dRyTcti9TvqT7E1Liuvg2/eh_ba773afddb014c49a67dc56c7b13e995/front_0efb519c6f854a72a41c2ad5598fafe9.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=70dc2b2b6e25ade9edcc43b93e92376d5648b9cff85146b2f0c6e652fe2c52a6&X-Amz-SignedHeaders=host",
+    "userId": "GweC5n0dRyTcti9TvqT7E1Liuvg2",
+    "sessionId": "eh_ba773afddb014c49a67dc56c7b13e995",
+    "fileName": "front_0efb519c6f854a72a41c2ad5598fafe9.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/1YIpLCCIaIbgTDHIfmgco32aHMB2/eh_68f93246e3074bb5bc9c81a6c67ab256/back_95355ff9500a4a60ad8c3a707138763b.jpg",
+    "size": 29258,
+    "lastModified": "2026-06-01T10:47:48.070Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/1YIpLCCIaIbgTDHIfmgco32aHMB2/eh_68f93246e3074bb5bc9c81a6c67ab256/back_95355ff9500a4a60ad8c3a707138763b.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=8129b2270659f2eb0120557a4d1d9e2a6b0d982876e7d42800d1fb4a11e1c668&X-Amz-SignedHeaders=host",
+    "userId": "1YIpLCCIaIbgTDHIfmgco32aHMB2",
+    "sessionId": "eh_68f93246e3074bb5bc9c81a6c67ab256",
+    "fileName": "back_95355ff9500a4a60ad8c3a707138763b.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/1YIpLCCIaIbgTDHIfmgco32aHMB2/eh_68f93246e3074bb5bc9c81a6c67ab256/front_52dc68680f734a1181159802126bd08d.jpg",
+    "size": 102633,
+    "lastModified": "2026-06-01T10:47:46.322Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/1YIpLCCIaIbgTDHIfmgco32aHMB2/eh_68f93246e3074bb5bc9c81a6c67ab256/front_52dc68680f734a1181159802126bd08d.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=fbde82d74872d8f4fac0406c5490c2d168455684352a351349f67a34e9def6e3&X-Amz-SignedHeaders=host",
+    "userId": "1YIpLCCIaIbgTDHIfmgco32aHMB2",
+    "sessionId": "eh_68f93246e3074bb5bc9c81a6c67ab256",
+    "fileName": "front_52dc68680f734a1181159802126bd08d.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/pKExaLXf2aNLyaOzbgoidCXCx2j1/eh_f9d61ba053f045418d2ea69f264a2846/front_de3d0c25a55948a7b90e5f67eaca2dcd.jpg",
+    "size": 370662,
+    "lastModified": "2026-06-01T08:12:55.002Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/pKExaLXf2aNLyaOzbgoidCXCx2j1/eh_f9d61ba053f045418d2ea69f264a2846/front_de3d0c25a55948a7b90e5f67eaca2dcd.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=c696fad004374ad9d58f45c56ab2cc95074b05b16d2b50691321072a10fb4967&X-Amz-SignedHeaders=host",
+    "userId": "pKExaLXf2aNLyaOzbgoidCXCx2j1",
+    "sessionId": "eh_f9d61ba053f045418d2ea69f264a2846",
+    "fileName": "front_de3d0c25a55948a7b90e5f67eaca2dcd.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_41a121a8ecaf42ba99eebb458a58258a.jpg",
+    "size": 321564,
+    "lastModified": "2026-05-29T14:24:32.596Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_41a121a8ecaf42ba99eebb458a58258a.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=bc90d654b73d9f06077204d1e18dbcc4b1db51f54e11b1fed5ae25efa5152a34&X-Amz-SignedHeaders=host",
+    "userId": "64oYgldovjMXhQTdmYuMPOmMrzx1",
+    "sessionId": "eh_38fe71760d014ff1a521ad9433752099",
+    "fileName": "front_41a121a8ecaf42ba99eebb458a58258a.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_3496e93744df46239fbd73aef2e4f955.jpg",
+    "size": 321564,
+    "lastModified": "2026-05-29T14:24:12.652Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_3496e93744df46239fbd73aef2e4f955.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=2405b5ca6e7f75f0a8cf496cf16f3f2d0815babbb713e6eee58199ac9c1d501b&X-Amz-SignedHeaders=host",
+    "userId": "64oYgldovjMXhQTdmYuMPOmMrzx1",
+    "sessionId": "eh_38fe71760d014ff1a521ad9433752099",
+    "fileName": "front_3496e93744df46239fbd73aef2e4f955.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_22c1ae03e39f44a9ab796139d1022014.jpg",
+    "size": 321564,
+    "lastModified": "2026-05-29T14:22:40.993Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_22c1ae03e39f44a9ab796139d1022014.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=4bf7f84b98506dc168660bb28465d331584d6d800f0bb401815742a2e58bae6a&X-Amz-SignedHeaders=host",
+    "userId": "64oYgldovjMXhQTdmYuMPOmMrzx1",
+    "sessionId": "eh_38fe71760d014ff1a521ad9433752099",
+    "fileName": "front_22c1ae03e39f44a9ab796139d1022014.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_11f4348df824449e9e1f26385c699916.jpg",
+    "size": 85123,
+    "lastModified": "2026-05-29T14:21:50.567Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/64oYgldovjMXhQTdmYuMPOmMrzx1/eh_38fe71760d014ff1a521ad9433752099/front_11f4348df824449e9e1f26385c699916.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=08faba8ba89f677015e56bce6dc89a154a6c2401c888a018971d3c51528c221b&X-Amz-SignedHeaders=host",
+    "userId": "64oYgldovjMXhQTdmYuMPOmMrzx1",
+    "sessionId": "eh_38fe71760d014ff1a521ad9433752099",
+    "fileName": "front_11f4348df824449e9e1f26385c699916.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ae469ce90dc344438c95580de2bd4d1d/back_e92882ee24f346168a13a8ea676aee3f.jpg",
+    "size": 486269,
+    "lastModified": "2026-05-18T09:33:37.745Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ae469ce90dc344438c95580de2bd4d1d/back_e92882ee24f346168a13a8ea676aee3f.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=73e21d642b2d7cc66a76dcb512ecc982ed88ad1fa13a7a596883bd708e74e866&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_ae469ce90dc344438c95580de2bd4d1d",
+    "fileName": "back_e92882ee24f346168a13a8ea676aee3f.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ae469ce90dc344438c95580de2bd4d1d/front_bbfd7cc5d96f479c9023456711c4752f.jpg",
+    "size": 321564,
+    "lastModified": "2026-05-18T09:33:36.020Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ae469ce90dc344438c95580de2bd4d1d/front_bbfd7cc5d96f479c9023456711c4752f.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=d60ff870ff9f67ee75c2c1bbf6fb49a8cf6dfe3b0800c3f6ad02f148a1fa767d&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_ae469ce90dc344438c95580de2bd4d1d",
+    "fileName": "front_bbfd7cc5d96f479c9023456711c4752f.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_68fbed5bef06486c95a67b07ab959863/back_a53dd3af0ee04220b2282ff937392738.jpg",
+    "size": 486269,
+    "lastModified": "2026-05-18T09:30:12.579Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_68fbed5bef06486c95a67b07ab959863/back_a53dd3af0ee04220b2282ff937392738.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=0eb1093d0499c636629c358b3ee30bdcc049c778ce7e7b08eac48f3d4e692878&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_68fbed5bef06486c95a67b07ab959863",
+    "fileName": "back_a53dd3af0ee04220b2282ff937392738.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_68fbed5bef06486c95a67b07ab959863/front_e979f8a0d4314a378b1d236d58bf5438.jpg",
+    "size": 321564,
+    "lastModified": "2026-05-18T09:30:04.344Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_68fbed5bef06486c95a67b07ab959863/front_e979f8a0d4314a378b1d236d58bf5438.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=411591fe74c8f6b9f27f9471e24654ed5af94ef76cde492dd798da3177f4d569&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_68fbed5bef06486c95a67b07ab959863",
+    "fileName": "front_e979f8a0d4314a378b1d236d58bf5438.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ac45dfbaed864a33aed18f14ac019212/back_2e649da987de42a9bdc2662a9f63242b.jpg",
+    "size": 486269,
+    "lastModified": "2026-05-18T08:36:22.450Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ac45dfbaed864a33aed18f14ac019212/back_2e649da987de42a9bdc2662a9f63242b.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=d85741a0f5fc09785ff232d549817e051fb0a3b6cc191325545fe98e825179e4&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_ac45dfbaed864a33aed18f14ac019212",
+    "fileName": "back_2e649da987de42a9bdc2662a9f63242b.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ac45dfbaed864a33aed18f14ac019212/front_312d73567cdb4676a2889c17262f503f.jpg",
+    "size": 321564,
+    "lastModified": "2026-05-18T08:36:14.823Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_ac45dfbaed864a33aed18f14ac019212/front_312d73567cdb4676a2889c17262f503f.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=6fcdc81bb79ccc97ea1e4ea3258c5229a311588ede2d2c3a112a977f049d388a&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_ac45dfbaed864a33aed18f14ac019212",
+    "fileName": "front_312d73567cdb4676a2889c17262f503f.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_8ee6749aa0714ce29c662c4b1f87142c/back_44074537402d4dec8f6268023aa89f64.jpg",
+    "size": 461974,
+    "lastModified": "2026-05-18T07:29:18.077Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_8ee6749aa0714ce29c662c4b1f87142c/back_44074537402d4dec8f6268023aa89f64.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=f45e6cd6baab9b762d2bee97d77e8db05d10bfc109c247a08b175a9db1f4b726&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_8ee6749aa0714ce29c662c4b1f87142c",
+    "fileName": "back_44074537402d4dec8f6268023aa89f64.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_8ee6749aa0714ce29c662c4b1f87142c/front_82d602c021f247818eb1809eeb6a299f.jpg",
+    "size": 295429,
+    "lastModified": "2026-05-18T07:28:49.157Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_8ee6749aa0714ce29c662c4b1f87142c/front_82d602c021f247818eb1809eeb6a299f.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=69ea9c7e07a7f7b39605aea373ef3bac308e4d1ee515fc09b5b29bb8c1567bc1&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_8ee6749aa0714ce29c662c4b1f87142c",
+    "fileName": "front_82d602c021f247818eb1809eeb6a299f.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_0d59f3b7e7514133ab575387d321d01c/front_5bdf0d69180d45cdb7db6e7972ce01c9.jpg",
+    "size": 367455,
+    "lastModified": "2026-05-18T07:19:20.490Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_0d59f3b7e7514133ab575387d321d01c/front_5bdf0d69180d45cdb7db6e7972ce01c9.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=1b9dd3f4a178ffad6aa37512163a73cfe4c7432df98e91791c6f7b6393bb5ead&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_0d59f3b7e7514133ab575387d321d01c",
+    "fileName": "front_5bdf0d69180d45cdb7db6e7972ce01c9.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/back_a3de9e2b24e94b18b28ee4cab6521f3b.jpg",
+    "size": 520947,
+    "lastModified": "2026-05-18T07:10:36.257Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/back_a3de9e2b24e94b18b28ee4cab6521f3b.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=f7240cc754e838a499e4370dc7bea3f400338ae78ca86c36152f7c50cec18918&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_6e71a1d68f85471c8901a2a9fd06573b",
+    "fileName": "back_a3de9e2b24e94b18b28ee4cab6521f3b.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/front_5689df929ae948f7b113dfacd393f589.jpg",
+    "size": 350303,
+    "lastModified": "2026-05-18T07:10:21.410Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/front_5689df929ae948f7b113dfacd393f589.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=a36cda825ea824b4399d20c4c773b03b651c2ad271383df31f05106af3640731&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_6e71a1d68f85471c8901a2a9fd06573b",
+    "fileName": "front_5689df929ae948f7b113dfacd393f589.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/front_3e7cfde353884a168b03aaa575988986.jpg",
+    "size": 350303,
+    "lastModified": "2026-05-18T07:03:43.888Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/front_3e7cfde353884a168b03aaa575988986.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=e3481c337c6e177360ca78404dfd65325a33846b872d3735b5bc13e32d611b93&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_6e71a1d68f85471c8901a2a9fd06573b",
+    "fileName": "front_3e7cfde353884a168b03aaa575988986.jpg"
+  },
+  {
+    "key": "aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/front_143e97d212be40f68ecdcb836cd39cb3.jpg",
+    "size": 350303,
+    "lastModified": "2026-05-18T06:58:22.807Z",
+    "url": "https://extrahandimages-api.apps.extrahand.in/extrahand-kyc-vault/aadhaar-ocr/sYXv5HuRG3O6muGsQvVUd87XAMD3/eh_6e71a1d68f85471c8901a2a9fd06573b/front_143e97d212be40f68ecdcb836cd39cb3.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=e10b3f5c4f720097a92d212d%2F20260603%2Feu-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260603T102126Z&X-Amz-Expires=3600&X-Amz-Signature=12b6d6593a0f8f59b50bece2b56b4f196522f785420e8497bd44aaedf330fa8b&X-Amz-SignedHeaders=host",
+    "userId": "sYXv5HuRG3O6muGsQvVUd87XAMD3",
+    "sessionId": "eh_6e71a1d68f85471c8901a2a9fd06573b",
+    "fileName": "front_143e97d212be40f68ecdcb836cd39cb3.jpg"
+  }
+]

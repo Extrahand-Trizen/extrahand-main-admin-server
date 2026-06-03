@@ -3,12 +3,12 @@ import mongoose from 'mongoose';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import { AdminNotification } from '../models/AdminNotification';
-import { AdminUser } from '../models/AdminUser';
 import { KycFollowUpStatus, KycReview, KycReviewStatus } from '../models/KycReview';
 import { KycSession } from '../models/KycSession';
 import { DashboardType } from '../types/dashboard';
 import { userServiceClient } from '../services/UserServiceClient';
 import { minioService } from '../services/MinioService';
+import { ensureKycAssigneeForUser } from '../services/AadhaarKycRecipientService';
 
 const AADHAAR_NOTIFICATION_TYPES = [
   'aadhaar_verification_failed',
@@ -56,16 +56,44 @@ function actor(req: Request) {
 }
 
 function notificationQuery(req: Request): Record<string, any> {
-  const query: Record<string, any> = {
+  return {
     dashboardType: DashboardType.MAIN_ADMIN,
     type: { $in: AADHAAR_NOTIFICATION_TYPES },
   };
+}
 
-  if (!isAllReviewsRole(req)) {
-    query.targetAdminUserIds = req.admin?.userId;
-  }
+function resolveProfileUid(user: any, fallbackUserId: string): string {
+  return String(user?.uid || user?.userId || fallbackUserId).trim();
+}
 
-  return query;
+function isProfileAadhaarVerified(user: any): boolean {
+  if (!user) return false;
+  if (user.isAadhaarVerified === true) return true;
+  const status = String(
+    user?.aadhaarKyc?.visibleStatus ||
+      user?.aadhaarKyc?.internalStatus ||
+      user?.aadhaarKyc?.status ||
+      '',
+  ).toLowerCase();
+  return status === 'verified';
+}
+
+async function syncKycSessionVerified(userId: string, verificationId?: string): Promise<void> {
+  const query: Record<string, unknown> = verificationId
+    ? { verification_id: verificationId }
+    : { userId, sessionType: 'aadhaar_ocr' };
+
+  await KycSession.findOneAndUpdate(
+    query,
+    {
+      $set: {
+        visibleStatus: 'verified',
+        internalStatus: 'completed',
+        status: 'completed',
+      },
+    },
+    { sort: { updatedAt: -1 } },
+  );
 }
 
 function isAcceptedFilter(value: string): boolean {
@@ -96,6 +124,87 @@ function getAadhaarStatus(user: any, notification: any): string {
       notification?.metadata?.status ||
       '',
   );
+}
+
+function buildVaultSessionPrefix(userId: string, verificationId: string): string {
+  const safeUser = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const safeSession = String(verificationId).replace(/[^a-zA-Z0-9_-]/g, '');
+  return `aadhaar-ocr/${safeUser}/${safeSession}/`;
+}
+
+function labelForVaultKey(key: string): string {
+  const fileName = key.split('/').pop() || key;
+  if (fileName.startsWith('back_')) return 'Aadhaar back';
+  if (fileName.startsWith('front_')) return 'Aadhaar front';
+  return 'Aadhaar image';
+}
+
+function pickLatestVaultSideKeys(
+  objects: Array<{ key: string; lastModified?: Date }>,
+): Array<{ key: string; label: string }> {
+  let front: { key: string; label: string; ts: number } | null = null;
+  let back: { key: string; label: string; ts: number } | null = null;
+
+  for (const object of objects) {
+    const fileName = object.key.split('/').pop() || object.key;
+    const ts = object.lastModified?.getTime() || 0;
+    const entry = { key: object.key, label: labelForVaultKey(object.key), ts };
+
+    if (fileName.startsWith('front_')) {
+      if (!front || ts > front.ts) front = entry;
+      continue;
+    }
+    if (fileName.startsWith('back_')) {
+      if (!back || ts > back.ts) back = entry;
+    }
+  }
+
+  const picked: Array<{ key: string; label: string }> = [];
+  if (front) picked.push({ key: front.key, label: front.label });
+  if (back) picked.push({ key: back.key, label: back.label });
+  return picked;
+}
+
+async function getVaultKeysForSession(
+  userId: string,
+  verificationId: string,
+  sessionOcr?: { frontImageKey?: string; backImageKey?: string },
+): Promise<Array<{ key: string; label: string }>> {
+  const merged = new Map<string, { key: string; label: string }>();
+
+  if (sessionOcr?.frontImageKey) {
+    merged.set(sessionOcr.frontImageKey, {
+      key: sessionOcr.frontImageKey,
+      label: 'Aadhaar front',
+    });
+  }
+  if (sessionOcr?.backImageKey) {
+    merged.set(sessionOcr.backImageKey, {
+      key: sessionOcr.backImageKey,
+      label: 'Aadhaar back',
+    });
+  }
+
+  if (verificationId && userId) {
+    const prefix = buildVaultSessionPrefix(userId, verificationId);
+    const objects = await minioService.listObjectKeys(prefix);
+    for (const item of pickLatestVaultSideKeys(objects)) {
+      merged.set(item.key, item);
+    }
+  }
+
+  const ordered: Array<{ key: string; label: string }> = [];
+  for (const item of merged.values()) {
+    if (item.label === 'Aadhaar front') ordered.unshift(item);
+    else if (item.label === 'Aadhaar back') ordered.push(item);
+    else ordered.push(item);
+  }
+
+  return ordered.sort((a, b) => {
+    const rank = (label: string) =>
+      label === 'Aadhaar front' ? 0 : label === 'Aadhaar back' ? 1 : 2;
+    return rank(a.label) - rank(b.label);
+  });
 }
 
 /**
@@ -138,14 +247,12 @@ async function getAadhaarDocuments(
           .lean();
       }
 
-      if (session?.ocr) {
-        const keysToSign: Array<{ key: string; label: string }> = [];
-        if (session.ocr.frontImageKey) {
-          keysToSign.push({ key: session.ocr.frontImageKey, label: 'Aadhaar front' });
-        }
-        if (session.ocr.backImageKey) {
-          keysToSign.push({ key: session.ocr.backImageKey, label: 'Aadhaar back' });
-        }
+      if (session?.ocr || verificationId) {
+        const keysToSign = await getVaultKeysForSession(
+          userId,
+          verificationId,
+          session?.ocr,
+        );
         if (keysToSign.length > 0) {
           const docs = await minioService.getPresignedUrls(keysToSign);
           if (docs.length > 0) return docs;
@@ -188,24 +295,6 @@ async function getAadhaarDocuments(
       url: String(url || ''),
     }))
     .filter((item: { label: string; url: string }) => item.url);
-}
-
-async function getAssignedTo(targetAdminUserIds: string[] = []) {
-  const ids = Array.from(new Set(targetAdminUserIds.filter(Boolean)));
-  if (ids.length === 0) return [];
-
-  const admins = await AdminUser.find({ userId: { $in: ids } })
-    .select('userId name email')
-    .lean();
-  const adminMap = new Map(admins.map((admin) => [admin.userId, admin]));
-  return ids.map((userId) => {
-    const admin = adminMap.get(userId);
-    return {
-      userId,
-      name: admin?.name || userId,
-      email: admin?.email || '',
-    };
-  });
 }
 
 async function buildReviewRows(req: Request) {
@@ -260,7 +349,24 @@ async function buildReviewRows(req: Request) {
     const review = exactReview || previousReview || null;
     const hasNewUploadAfterReview =
       !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
-    const assignedTo = await getAssignedTo(notification.targetAdminUserIds || []);
+
+    const assignee = await ensureKycAssigneeForUser(userId);
+    if (!isAllReviewsRole(req)) {
+      const myId = req.admin?.userId;
+      if (!assignee || assignee.userId !== myId) {
+        continue;
+      }
+    }
+
+    const assignedTo = assignee
+      ? [
+          {
+            userId: assignee.userId,
+            name: assignee.name,
+            email: assignee.email,
+          },
+        ]
+      : [];
 
     // Resolve presigned Aadhaar image URLs from the KYC vault using the correct verificationId
     const documents = await getAadhaarDocuments(user, verificationId, userId);
@@ -290,6 +396,7 @@ async function buildReviewRows(req: Request) {
       reviewedAt: review?.reviewedAt || null,
       sessionId,
       verificationId: user?.aadhaarKyc?.verificationId || notification.metadata?.verificationId || '',
+      isAadhaarVerified: isProfileAadhaarVerified(user),
       documents,
       profileUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
     });
@@ -363,11 +470,43 @@ export class KycReviewController {
       const { userId } = req.params;
       const { sessionId, verificationId } = req.body || {};
 
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Accept KYC review: user lookup failed', { userId, error: error.message });
+      }
+
+      const profileUid = resolveProfileUid(user, userId);
+
+      if (isProfileAadhaarVerified(user)) {
+        res.status(400).json({
+          success: false,
+          error: 'Aadhaar is already verified for this user',
+        });
+        return;
+      }
+
+      let maskedAadhaar =
+        user?.maskedAadhaar ||
+        (typeof user?.aadhaarKyc?.maskedAadhaar === 'string' ? user.aadhaarKyc.maskedAadhaar : undefined);
+
+      if (!maskedAadhaar && verificationId) {
+        const session = await KycSession.findOne(
+          { verification_id: verificationId },
+          { 'ocr.maskedAadhaar': 1 },
+        ).lean();
+        maskedAadhaar = session?.ocr?.maskedAadhaar;
+      }
+
+      const verifiedAt = new Date().toISOString();
       await userServiceClient.updateAadhaarVerification(
-        userId,
+        profileUid,
         {
           isAadhaarVerified: true,
-          aadhaarVerifiedAt: new Date().toISOString(),
+          aadhaarVerifiedAt: verifiedAt,
+          ...(maskedAadhaar ? { maskedAadhaar } : {}),
           status: 'verified',
           internalStatus: 'verified',
           visibleStatus: 'Verified',
@@ -375,11 +514,13 @@ export class KycReviewController {
         req.admin!.userId,
       );
 
+      await syncKycSessionVerified(profileUid, verificationId || sessionId || undefined);
+
       const review = await KycReview.findOneAndUpdate(
-        { userId, sessionId: sessionId || '' },
+        { userId: profileUid, sessionId: sessionId || '' },
         {
           $set: {
-            userId,
+            userId: profileUid,
             sessionId: sessionId || '',
             verificationId: verificationId || '',
             reviewStatus: 'accepted',
@@ -393,10 +534,20 @@ export class KycReviewController {
         { new: true, upsert: true, setDefaultsOnInsert: true },
       ).lean();
 
-      res.json({ success: true, data: review });
+      res.json({
+        success: true,
+        data: {
+          ...review,
+          isAadhaarVerified: true,
+          aadhaarVerifiedAt: verifiedAt,
+        },
+      });
     } catch (error: any) {
       logger.error('Accept KYC review error:', error);
-      res.status(500).json({ success: false, error: 'Failed to accept Aadhaar review' });
+      res.status(500).json({
+        success: false,
+        error: error.response?.data?.error || error.message || 'Failed to accept Aadhaar review',
+      });
     }
   }
 
@@ -409,16 +560,34 @@ export class KycReviewController {
       const followUpStatus = normalizeFollowUpStatus(req.body?.followUpStatus) || 'follow_up';
       const followUpDate = req.body?.followUpDate ? new Date(req.body.followUpDate) : null;
 
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Reject KYC review: user lookup failed', { userId, error: error.message });
+      }
+
+      if (isProfileAadhaarVerified(user)) {
+        res.status(400).json({
+          success: false,
+          error: 'Cannot reject: Aadhaar is already verified for this user',
+        });
+        return;
+      }
+
+      const profileUid = resolveProfileUid(user, userId);
+
       if (followUpStatus === 'follow_up' && (!followUpDate || Number.isNaN(followUpDate.getTime()))) {
         res.status(400).json({ success: false, error: 'Follow-up date is required' });
         return;
       }
 
       const review = await KycReview.findOneAndUpdate(
-        { userId, sessionId: sessionId || '' },
+        { userId: profileUid, sessionId: sessionId || '' },
         {
           $set: {
-            userId,
+            userId: profileUid,
             sessionId: sessionId || '',
             verificationId: verificationId || '',
             reviewStatus: 'rejected',

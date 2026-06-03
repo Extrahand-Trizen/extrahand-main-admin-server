@@ -8,7 +8,10 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "prod": "NODE_ENV=production node dist/server.js",
-    "seed:super-admin": "ts-node scripts/seed-super-admin.ts"
+    "seed:super-admin": "ts-node scripts/seed-super-admin.ts",
+    "list:kyc-vault": "ts-node scripts/list-kyc-vault-images.ts",
+    "list:kyc-vault:open": "ts-node scripts/list-kyc-vault-images.ts --open",
+    "repair:aadhaar-assignments": "ts-node scripts/repair-aadhaar-kyc-assignments.ts"
   },
   "engines": {
     "node": ">=18"

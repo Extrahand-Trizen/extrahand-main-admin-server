@@ -82,6 +82,44 @@ class MinioService {
   }
 
   /**
+   * List object keys under a prefix (newest first).
+   */
+  async listObjectKeys(prefix: string): Promise<Array<{ key: string; lastModified?: Date }>> {
+    if (!this.initialized || !this.s3 || !prefix) return [];
+
+    const items: Array<{ key: string; lastModified?: Date }> = [];
+    let continuationToken: string | undefined;
+
+    try {
+      do {
+        const response = await this.s3
+          .listObjectsV2({
+            Bucket: this.bucketName,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+            MaxKeys: 1000,
+          })
+          .promise();
+
+        for (const object of response.Contents || []) {
+          if (object.Key) {
+            items.push({ key: object.Key, lastModified: object.LastModified });
+          }
+        }
+
+        continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+      } while (continuationToken);
+    } catch (error: any) {
+      logger.warn('MinioService: failed to list objects', { prefix, error: error.message });
+      return [];
+    }
+
+    return items.sort(
+      (a, b) => (b.lastModified?.getTime() || 0) - (a.lastModified?.getTime() || 0),
+    );
+  }
+
+  /**
    * Presign multiple keys in parallel.  Keys that fail are silently omitted.
    */
   async getPresignedUrls(

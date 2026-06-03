@@ -24,6 +24,7 @@ function getKycVerificationDbName(): string {
 interface KycSessionOcr {
   frontImageKey?: string;
   backImageKey?: string;
+  maskedAadhaar?: string;
 }
 
 export interface KycSessionDocument extends Document {

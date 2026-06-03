@@ -1,12 +1,13 @@
 import { Request, Response } from 'express';
 import logger from '../config/logger';
-import { AdminUser } from '../models/AdminUser';
 import { AdminNotification } from '../models/AdminNotification';
 import { DashboardType } from '../types/dashboard';
 import { normalizeTaskIdForAssignment } from '../constants/taskAssignment';
 import { visibleNotificationsQuery } from '../utils/notificationVisibility';
 import { getNextTaskPostedRecipient } from '../services/TaskPostedRecipientService';
 import { persistTaskAssignment } from '../services/TaskAssignmentService';
+import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
+import { buildKycReviewLinkUrl } from '../services/AadhaarKycRecipientService';
 
 const MAX_LIST_LIMIT = 100;
 
@@ -23,6 +24,8 @@ type NotificationEventPayload = {
   userPhone?: string;
   status?: string;
   failureReason?: string;
+  verificationId?: string;
+  sessionId?: string;
   taskId?: string;
   taskTitle?: string;
   occurredAt?: string;
@@ -37,9 +40,7 @@ function buildNotificationPayload(event: NotificationEventPayload) {
             event.failureReason ? `: ${event.failureReason}` : '.'
           }`
         : 'Aadhaar verification failed for a user.',
-      linkUrl: event.userId
-        ? `/users/${encodeURIComponent(event.userId)}?tab=verification`
-        : undefined,
+      linkUrl: event.userId ? buildKycReviewLinkUrl(event.userId) : undefined,
     };
   }
 
@@ -49,9 +50,7 @@ function buildNotificationPayload(event: NotificationEventPayload) {
       message: event.userName
         ? `${event.userName}'s Aadhaar verification is under review.`
         : 'Aadhaar verification is under review for a user.',
-      linkUrl: event.userId
-        ? `/users/${encodeURIComponent(event.userId)}?tab=verification`
-        : undefined,
+      linkUrl: event.userId ? buildKycReviewLinkUrl(event.userId) : undefined,
     };
   }
 
@@ -62,28 +61,6 @@ function buildNotificationPayload(event: NotificationEventPayload) {
       : 'A new task has been posted.',
     linkUrl: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}` : undefined,
   };
-}
-
-async function getOperationsAdminRecipientUserIds(): Promise<string[]> {
-  const admins = await AdminUser.find({
-    status: 'active',
-    'dashboardAccess.dashboardType': DashboardType.MAIN_ADMIN,
-    'dashboardAccess.status': 'active',
-    'dashboardAccess.role': { $in: ['operations_admin', 'operation_admin', 'operations'] },
-  })
-    .select('userId dashboardAccess isSuperAdmin')
-    .lean();
-
-  return admins
-    .filter((admin) =>
-      admin.dashboardAccess?.some(
-        (access) =>
-          access.dashboardType === DashboardType.MAIN_ADMIN &&
-          access.status === 'active' &&
-          ['operations_admin', 'operation_admin', 'operations'].includes(access.role)
-      )
-    )
-    .map((admin) => admin.userId);
 }
 
 export async function createTaskPostedAdminNotification(
@@ -209,12 +186,22 @@ export class NotificationController {
 
       const data = notifications.map((notification) => {
         const readEntry = notification.readBy?.find((entry) => entry.userId === userId);
+        const kycUserId = String(notification.metadata?.userId || '').trim();
+        const isAadhaarType =
+          notification.type === 'aadhaar_verification_failed' ||
+          notification.type === 'aadhaar_verification_under_review';
+        const linkUrl =
+          isAadhaarType && kycUserId
+            ? buildKycReviewLinkUrl(kycUserId)
+            : notification.linkUrl;
+
         return {
           id: String(notification._id),
           type: notification.type,
           title: notification.title,
           message: notification.message,
-          linkUrl: notification.linkUrl,
+          linkUrl,
+          kycUserId: isAadhaarType ? kycUserId : undefined,
           createdAt: notification.createdAt,
           isRead: Boolean(readEntry),
           readAt: readEntry?.readAt || null,
@@ -357,76 +344,32 @@ export class NotificationController {
         return;
       }
 
-      const notification = buildNotificationPayload(payload);
-      const targetAdminUserIds = await getOperationsAdminRecipientUserIds();
-      if (targetAdminUserIds.length === 0) {
-        logger.warn(
-          'No active target operations_admin users found for main-admin notification; skipping targeted notification',
-          { eventType: payload.type },
-        );
-        res.json({ success: true, skipped: true });
-        return;
-      }
-
-      const existingAadhaarNotification = await AdminNotification.findOne({
+      const result = await createAadhaarKycAdminNotification({
         type: payload.type,
-        dashboardType: DashboardType.MAIN_ADMIN,
-        'metadata.userId': payload.userId,
-        ...(payload.status ? { 'metadata.status': payload.status } : {}),
-      })
-        .select('_id')
-        .lean();
-      if (
-        existingAadhaarNotification &&
-        (payload.type === 'aadhaar_verification_failed' ||
-          payload.type === 'aadhaar_verification_under_review')
-      ) {
-        await AdminNotification.updateOne(
-          { _id: existingAadhaarNotification._id },
-          {
-            $addToSet: {
-              targetAdminUserIds: { $each: targetAdminUserIds },
-            },
-            $set: {
-              'metadata.userName': payload.userName,
-              'metadata.userEmail': payload.userEmail,
-              'metadata.userPhone': payload.userPhone,
-              'metadata.status': payload.status,
-              'metadata.failureReason': payload.failureReason,
-              'metadata.occurredAt': payload.occurredAt,
-            },
-          },
-        );
-        res.json({
-          success: true,
-          updated: true,
-          reason: 'aadhaar_notification_already_exists_targets_refreshed',
-          notificationId: String(existingAadhaarNotification._id),
-        });
-        return;
-      }
-
-      await AdminNotification.create({
-        type: payload.type,
-        title: notification.title,
-        message: notification.message,
-        linkUrl: notification.linkUrl,
-        dashboardType: DashboardType.MAIN_ADMIN,
-        targetAdminUserIds,
-        metadata: {
-          userId: payload.userId,
-          userName: payload.userName,
-          userEmail: payload.userEmail,
-          userPhone: payload.userPhone,
-          status: payload.status,
-          failureReason: payload.failureReason,
-          taskId: payload.taskId,
-          taskTitle: payload.taskTitle,
-          occurredAt: payload.occurredAt,
-        },
+        userId: payload.userId,
+        userName: payload.userName,
+        userEmail: payload.userEmail,
+        userPhone: payload.userPhone,
+        status: payload.status,
+        failureReason: payload.failureReason,
+        verificationId: payload.verificationId,
+        sessionId: payload.sessionId,
+        occurredAt: payload.occurredAt,
       });
 
-      res.json({ success: true });
+      if (!result.created) {
+        res.json({ success: true, skipped: true, reason: 'no_active_aadhaar_kyc_recipient' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          notificationId: result.notificationId,
+          assignedTo: result.assignedTo,
+          targetAdminUserIds: result.targetAdminUserIds,
+        },
+      });
     } catch (error: any) {
       logger.error('Notification event error:', error);
       res.status(500).json({

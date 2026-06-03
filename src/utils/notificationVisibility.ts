@@ -13,6 +13,11 @@ export function isTaskPostedCyclicRecipient(email?: string): boolean {
  * task_posted: only the single assigned ops admin (one of the 3 cyclic recipients).
  * Other types: existing targeted / broadcast rules.
  */
+const AADHAAR_NOTIFICATION_TYPES = [
+  'aadhaar_verification_failed',
+  'aadhaar_verification_under_review',
+];
+
 export function visibleNotificationsQuery(
   dashboardType: DashboardType,
   userId: string,
@@ -20,12 +25,18 @@ export function visibleNotificationsQuery(
 ): Record<string, unknown> {
   const conditions: Record<string, unknown>[] = [
     {
-      type: { $ne: 'task_posted' },
+      type: {
+        $nin: ['task_posted', ...AADHAAR_NOTIFICATION_TYPES],
+      },
       $or: [
         { targetAdminUserIds: { $exists: false } },
         { targetAdminUserIds: { $size: 0 } },
         { targetAdminUserIds: userId },
       ],
+    },
+    {
+      type: { $in: AADHAAR_NOTIFICATION_TYPES },
+      targetAdminUserIds: userId,
     },
   ];
 
