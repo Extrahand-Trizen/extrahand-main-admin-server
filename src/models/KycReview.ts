@@ -17,6 +17,13 @@ export interface KycReviewDocument extends Document {
     name: string;
   };
   reviewedAt?: Date;
+  /** Set when photos were manually uploaded by an admin (sessionId starts with admin_upload_) */
+  uploadedBy?: {
+    userId: string;
+    email: string;
+    name: string;
+  };
+  uploadedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +58,8 @@ const KycReviewSchema = new Schema<KycReviewDocument>(
     rejectionReason: { type: String },
     reviewedBy: { type: ReviewerSchema },
     reviewedAt: { type: Date },
+    uploadedBy: { type: ReviewerSchema },
+    uploadedAt: { type: Date },
   },
   { timestamps: true },
 );

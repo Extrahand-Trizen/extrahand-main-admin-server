@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import mongoose from 'mongoose';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import { AdminNotification } from '../models/AdminNotification';
@@ -9,6 +8,7 @@ import { DashboardType } from '../types/dashboard';
 import { userServiceClient } from '../services/UserServiceClient';
 import { minioService } from '../services/MinioService';
 import { ensureKycAssigneeForUser } from '../services/AadhaarKycRecipientService';
+import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
 
 const AADHAAR_NOTIFICATION_TYPES = [
   'aadhaar_verification_failed',
@@ -371,6 +371,10 @@ async function buildReviewRows(req: Request) {
     // Resolve presigned Aadhaar image URLs from the KYC vault using the correct verificationId
     const documents = await getAadhaarDocuments(user, verificationId, userId);
 
+    // Detect manual admin-upload sessions (sessionId starts with "admin_upload_")
+    const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
+    const uploadedBy = review?.uploadedBy || null;
+
     rows.push({
       notificationId: String(notification._id),
       userId,
@@ -397,6 +401,9 @@ async function buildReviewRows(req: Request) {
       sessionId,
       verificationId: user?.aadhaarKyc?.verificationId || notification.metadata?.verificationId || '',
       isAadhaarVerified: isProfileAadhaarVerified(user),
+      isManualUpload,
+      uploadedBy,
+      uploadedAt: review?.uploadedAt || null,
       documents,
       profileUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
     });
@@ -405,7 +412,243 @@ async function buildReviewRows(req: Request) {
   return rows;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Admin-initiated Aadhaar document upload
+// ──────────────────────────────────────────────────────────────────────────────
+
+const ALLOWED_UPLOAD_SIDES = ['front', 'back'] as const;
+type AadhaarSide = (typeof ALLOWED_UPLOAD_SIDES)[number];
+
+function isValidSide(value: unknown): value is AadhaarSide {
+  return ALLOWED_UPLOAD_SIDES.includes(value as AadhaarSide);
+}
+
+/**
+ * Generate a fresh admin-upload session ID for this batch.
+ * Format: admin_upload_{userId}_{timestamp}
+ * Each new upload batch (front+back pair) gets its own folder so re-uploads
+ * never mix old and new images. The KYC review panel always picks the latest
+ * pair via pickLatestVaultSideKeys which sorts by lastModified descending.
+ */
+function newAdminUploadSessionId(userId: string): string {
+  return `admin_upload_${userId}_${Date.now()}`;
+}
+
+/**
+ * GET /api/v1/kyc-reviews/:userId/upload-status
+ *
+ * Returns whether admin-uploaded photos exist for this user and, if so,
+ * the most recent session details.  Used by the UI to decide whether to show
+ * "Upload photos" or "Re-upload photos".
+ */
+
+/**
+ * POST /api/v1/kyc-reviews/:userId/upload-aadhaar
+ *
+ * Uploads a single Aadhaar photo (front or back) to the KYC vault on behalf
+ * of a user.  The caller must pass `sessionId` in the form body so that both
+ * front and back of the same batch land in the same folder.
+ *
+ * Flow:
+ *   1. Frontend calls GET upload-status to get (or create) a sessionId.
+ *   2. Front image uploaded with that sessionId.
+ *   3. Back image uploaded with the same sessionId.
+ *   4. After back-side upload, notification is sent and KycReview is upserted.
+ *
+ * On re-upload the frontend generates a brand-new sessionId (from the
+ * newAdminUploadSessionId helper echoed in the upload-status response) so
+ * the new batch lives in a different prefix and the review panel picks only
+ * the latest pair.
+ */
+
 export class KycReviewController {
+  /** Returns existing upload info so the UI can show "Re-upload" if photos exist. */
+  static async getUploadStatus(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+
+    try {
+      const { userId } = req.params;
+
+      // Find the most recent KycReview for this user that has an admin-upload sessionId
+      const review = await KycReview.findOne({
+        userId,
+        sessionId: { $regex: /^admin_upload_/ },
+      })
+        .sort({ updatedAt: -1 })
+        .lean();
+
+      // Generate a fresh session ID that the frontend will use for the next upload batch.
+      // This ensures re-uploads always land in a new folder.
+      const nextSessionId = newAdminUploadSessionId(userId);
+
+      if (!review) {
+        res.json({
+          success: true,
+          data: {
+            hasUpload: false,
+            sessionId: null,
+            uploadedAt: null,
+            reviewStatus: null,
+            nextSessionId,
+          },
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          hasUpload: true,
+          sessionId: review.sessionId,
+          uploadedAt: review.updatedAt,
+          reviewStatus: review.reviewStatus,
+          nextSessionId,
+        },
+      });
+    } catch (error: any) {
+      logger.error('getUploadStatus error:', error);
+      res.status(500).json({ success: false, error: 'Failed to get upload status' });
+    }
+  }
+
+  static async uploadAadhaarDocument(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+
+    try {
+      const { userId } = req.params;
+      const side = String(req.body?.side || '').trim().toLowerCase();
+
+      if (!isValidSide(side)) {
+        res.status(400).json({ success: false, error: 'side must be "front" or "back"' });
+        return;
+      }
+
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file) {
+        res.status(400).json({ success: false, error: 'Image file is required' });
+        return;
+      }
+
+      // sessionId must be provided by the caller (from upload-status nextSessionId)
+      // so front and back of the same batch share the same folder.
+      const sessionId = String(req.body?.sessionId || '').trim();
+      if (!sessionId) {
+        res.status(400).json({ success: false, error: 'sessionId is required' });
+        return;
+      }
+
+      if (!minioService.isReady) {
+        res.status(503).json({
+          success: false,
+          error: 'Storage service not available. Please configure MinIO/S3.',
+        });
+        return;
+      }
+
+      // Fetch user profile for notification metadata
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (err: any) {
+        logger.warn('uploadAadhaarDocument: user lookup failed', { userId, error: err.message });
+      }
+
+      const existingVerificationId = String(user?.aadhaarKyc?.verificationId || '').trim();
+
+      // Build object key — side prefix ensures pickLatestVaultSideKeys can identify front/back
+      const timestamp = Date.now();
+      const ext = file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+      const objectKey = `aadhaar-ocr/${userId}/${sessionId}/${side}_${timestamp}.${ext}`;
+
+      // ── Write directly to the KYC vault bucket ──────────────────────────────
+      await minioService.uploadFile(objectKey, file.buffer, file.mimetype);
+
+      logger.info('Admin uploaded Aadhaar document to KYC vault', {
+        adminUserId: req.admin!.userId,
+        userId,
+        side,
+        objectKey,
+        bucket: 'extrahand-kyc-vault (via MinioService)',
+      });
+
+      // ── After back-side upload: notify + upsert KycReview ───────────────────
+      if (side === 'back') {
+        // Upsert KycReview with this sessionId (new batch = new record keyed by sessionId)
+        try {
+          await KycReview.findOneAndUpdate(
+            { userId, sessionId },
+            {
+              $set: {
+                userId,
+                sessionId,
+                verificationId: existingVerificationId || '',
+                reviewStatus: 'pending',
+                followUpStatus: 'none',
+                followUpDate: null,
+                rejectionReason: '',
+                uploadedBy: {
+                  userId: req.admin!.userId,
+                  email: req.admin!.email,
+                  name: req.admin!.name,
+                },
+                uploadedAt: new Date(),
+              },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true },
+          );
+        } catch (reviewErr: any) {
+          logger.warn('Failed to upsert KycReview after admin upload', {
+            userId,
+            error: reviewErr.message,
+          });
+        }
+
+        // Send notification to operations admin (cyclic round-robin)
+        try {
+          const payload = {
+            type: 'aadhaar_verification_under_review' as const,
+            userId,
+            userName: user?.name || undefined,
+            userEmail: user?.email || undefined,
+            userPhone: user?.phone || undefined,
+            status: 'under_review',
+            verificationId: sessionId,
+            sessionId,
+            occurredAt: new Date().toISOString(),
+          };
+          const notifResult = await createAadhaarKycAdminNotification(payload);
+          logger.info('Aadhaar under_review notification sent after admin upload', {
+            userId,
+            notificationId: notifResult.notificationId,
+            assignedTo: notifResult.assignedTo?.email,
+          });
+        } catch (notifErr: any) {
+          logger.warn('Failed to send aadhaar_verification_under_review notification', {
+            userId,
+            error: notifErr.message,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          side,
+          objectKey,
+          sessionId,
+          message:
+            side === 'back'
+              ? 'Both Aadhaar photos uploaded. Notification sent to operations admin.'
+              : 'Front photo uploaded. Please upload the back side next.',
+        },
+      });
+    } catch (error: any) {
+      logger.error('uploadAadhaarDocument error:', error);
+      res.status(500).json({ success: false, error: 'Failed to upload Aadhaar document' });
+    }
+  }
+
   static async list(req: Request, res: Response): Promise<void> {
     if (!requireKycReviewAccess(req, res)) return;
 

@@ -62,6 +62,27 @@ class MinioService {
   }
 
   /**
+   * Upload a file buffer to the KYC vault bucket.
+   * Returns the object key on success, throws on failure.
+   */
+  async uploadFile(key: string, buffer: Buffer, contentType: string): Promise<void> {
+    if (!this.initialized || !this.s3) {
+      throw new Error('MinioService: storage not configured — cannot upload');
+    }
+
+    await this.s3
+      .putObject({
+        Bucket: this.bucketName,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+      })
+      .promise();
+
+    logger.info('MinioService: file uploaded', { key, bucket: this.bucketName, size: buffer.length });
+  }
+
+  /**
    * Returns a presigned GET URL for the given object key, or null if MinIO is
    * not configured or an error occurs.  Never throws — callers degrade gracefully.
    */
