@@ -145,6 +145,29 @@ export class UserServiceClient {
     );
     return response.data;
   }
+
+  async updateAadhaarVerification(
+    userId: string,
+    updates: {
+      isAadhaarVerified: boolean;
+      aadhaarVerifiedAt?: string;
+      maskedAadhaar?: string;
+      status?: string;
+      internalStatus?: string;
+      visibleStatus?: string;
+      failureReason?: string;
+    },
+    adminUserId: string,
+  ): Promise<any> {
+    const response = await this.client.patch(
+      `/api/v1/profiles/${this.encodeUserPathSegment(userId)}/verification/aadhaar`,
+      updates,
+      {
+        headers: { 'X-User-Id': adminUserId },
+      },
+    );
+    return response.data;
+  }
   
   /**
    * Ban user

@@ -16,6 +16,7 @@
   "dependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/jsonwebtoken": "^9.0.10",
+    "aws-sdk": "^2.1692.0",
     "axios": "^1.6.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.7.4",
