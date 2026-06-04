@@ -29,7 +29,8 @@ const envSchema = z.object({
   MICROSOFT_TENANT_ID: z.string().optional(),
   MICROSOFT_REDIRECT_URI: z.string().url('MICROSOFT_REDIRECT_URI must be a valid URL').optional(),
   
-  // Frontend URLs
+  // Frontend URLs and CORS
+  CORS_ORIGIN: z.string().optional(),
   ADMIN_DASHBOARD_URL: z.string().url().default('http://localhost:3000'),
   MAIN_ADMIN_DASHBOARD_URL: z.string().url().default('http://localhost:3001'),
   SUPER_ADMIN_DASHBOARD_URL: z.string().url().default('http://localhost:3002'),

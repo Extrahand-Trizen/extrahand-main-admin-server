@@ -11,12 +11,16 @@ const app: Application = express();
 // Security middleware
 app.use(helmet());
 
-const allowedOrigins = [
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : [];
+const allowedOrigins = Array.from(new Set([
+  ...corsOrigins,
   process.env.MAIN_ADMIN_DASHBOARD_URL,
   process.env.ADMIN_DASHBOARD_URL,
   'http://localhost:3000',
   'http://localhost:3001',
-].filter(Boolean) as string[];
+].filter(Boolean))) as string[];
 
 // CORS configuration
 app.use(cors({
