@@ -79,6 +79,7 @@ export class UserManagementController {
             : undefined,
         createdFrom: req.query.createdFrom as string,
         createdTo: req.query.createdTo as string,
+        area: req.query.area as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
@@ -100,6 +101,26 @@ export class UserManagementController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list users',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/users/areas/hyderabad
+   * Distinct Hyderabad sub-areas for user filters.
+   */
+  static async getHyderabadSubAreas(req: Request, res: Response): Promise<void> {
+    try {
+      const result = await userServiceClient.getHyderabadSubAreas();
+      res.json({
+        success: true,
+        data: result.data || [],
+      });
+    } catch (error: any) {
+      logger.error('List Hyderabad sub-areas error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to list Hyderabad sub-areas',
       });
     }
   }

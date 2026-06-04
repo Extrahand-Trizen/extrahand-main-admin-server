@@ -15,6 +15,12 @@ router.get(
   UserManagementController.listUsers
 );
 
+router.get(
+  '/areas/hyderabad',
+  requirePermission(`${Resource.USER}.${Action.LIST}`),
+  UserManagementController.getHyderabadSubAreas
+);
+
 // GET  /cleanup/no-role?dry_run=true  — preview users with no role (safe, no deletion)
 // POST /cleanup/no-role               — delete users with no role (body: { dry_run: false })
 router.get(

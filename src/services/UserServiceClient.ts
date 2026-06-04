@@ -70,6 +70,7 @@ export class UserServiceClient {
     status?: string;
     role?: string;
     category?: string;
+    area?: string;
     isAadhaarVerified?: boolean;
     isCertified?: boolean;
     createdFrom?: string;
@@ -81,6 +82,11 @@ export class UserServiceClient {
     return response.data;
   }
 
+  async getHyderabadSubAreas(): Promise<any> {
+    const response = await this.client.get('/api/v1/users/areas/hyderabad');
+    return response.data;
+  }
+  
   /**
    * Get role counts aggregated from profiles.roles in user-service
    */

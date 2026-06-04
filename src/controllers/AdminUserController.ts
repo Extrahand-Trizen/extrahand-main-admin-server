@@ -17,6 +17,9 @@ export class AdminUserController {
       
       const query: any = {};
       
+      // Only show active users by default, suspended users should not appear in the list
+      query.status = status || 'active';
+      
       if (search) {
         query.$or = [
           { email: { $regex: search, $options: 'i' } },
@@ -26,10 +29,6 @@ export class AdminUserController {
       
       if (dashboardType) {
         query['dashboardAccess.dashboardType'] = dashboardType;
-      }
-      
-      if (status) {
-        query.status = status;
       }
       
       const skip = (Number(page) - 1) * Number(limit);

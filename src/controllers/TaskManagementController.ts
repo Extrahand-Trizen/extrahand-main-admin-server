@@ -175,14 +175,32 @@ async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise
   return tasks.slice(0, maxTasks);
 }
 
+function extractProposedAmount(application: any): number | undefined {
+  if (typeof application?.proposedAmount === 'number') {
+    return application.proposedAmount;
+  }
+  if (typeof application?.proposed_amount === 'number') {
+    return application.proposed_amount;
+  }
+  const budget = application?.proposedBudget;
+  if (typeof budget === 'number') {
+    return budget;
+  }
+  if (budget && typeof budget.amount === 'number') {
+    return budget.amount;
+  }
+  return undefined;
+}
+
 function normalizeApplication(application: any): any {
+  const proposedAmount = extractProposedAmount(application);
   return {
     ...application,
     applicationId:
       application?.applicationId || application?.id || application?._id,
     HelperId: application?.HelperId || application?.applicantId,
-    proposedAmount:
-      application?.proposedAmount ?? application?.proposedBudget ?? undefined,
+    proposedAmount,
+    proposedBudget: application?.proposedBudget,
   };
 }
 

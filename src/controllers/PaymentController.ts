@@ -225,19 +225,36 @@ export class PaymentController {
       const q = (req.query as any).q as string | undefined;
       const params: Record<string, any> = {
         ...(req.query as Record<string, any>),
-        ...(q ? { performerUid: q } : {}),
+        ...(q ? { q } : {}),
+        limit: Math.min(Number(req.query.limit) || 200, 200),
+        offset: Number(req.query.offset) || 0,
       };
       delete params.q;
 
-      const data = await safeGet<any>('/api/v1/dashboard/payouts', params, {
+      const data = await safeGet<any>('/api/v1/admin/payouts', params, {
         success: true,
-        items: [],
+        payouts: [],
         total: 0,
       });
+
+      const rawRows = data.payouts ?? data.items ?? [];
+      const rows = rawRows.map((row: any) => ({
+        payoutId: row.payoutId,
+        performerUid: row.performerUid,
+        taskId: row.taskId || row.escrow?.taskId || null,
+        CustomerUid: row.escrow?.posterUid || null,
+        amount: String(row.amount ?? ''),
+        netAmount: String(row.netAmount ?? ''),
+        status: row.status,
+        source: row.source || row.type || null,
+        type: row.type || null,
+        createdAt: row.createdAt,
+      }));
+
       res.json({
         success: true,
-        data: data.payouts ?? data.items ?? [],
-        total: data.total ?? 0,
+        data: rows,
+        total: data.total ?? rows.length,
       });
     } catch (error: any) {
       logger.error('List payouts error:', error);

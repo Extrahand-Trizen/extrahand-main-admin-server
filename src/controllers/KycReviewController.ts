@@ -661,9 +661,16 @@ export class KycReviewController {
 
       if (reviewStatus !== 'all') {
         if (isAcceptedFilter(reviewStatus)) {
-          rows = rows.filter((row) => row.reviewStatus === 'accepted');
+          rows = rows.filter((row) => row.reviewStatus === 'accepted' || row.isAadhaarVerified);
         } else if (isRejectedFilter(reviewStatus)) {
           rows = rows.filter((row) => row.reviewStatus === 'rejected');
+        } else if (reviewStatus === 'pending') {
+          rows = rows.filter(
+            (row) =>
+              !row.isAadhaarVerified &&
+              row.reviewStatus !== 'accepted' &&
+              row.reviewStatus !== 'rejected',
+          );
         } else {
           rows = rows.filter((row) => row.reviewStatus === reviewStatus);
         }
