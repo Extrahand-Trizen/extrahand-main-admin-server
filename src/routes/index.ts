@@ -11,6 +11,7 @@ import paymentRoutes from './payments';
 import notificationRoutes from './notifications';
 import taskCallRoutes from './taskCalls';
 import kycReviewRoutes from './kycReviews';
+import aadhaarFollowUpRoutes from './aadhaarFollowUps';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.use(`${API_PREFIX}/payments`, paymentRoutes);
 router.use(`${API_PREFIX}/notifications`, notificationRoutes);
 router.use(`${API_PREFIX}/task-calls`, taskCallRoutes);
 router.use(`${API_PREFIX}/kyc-reviews`, kycReviewRoutes);
+router.use(`${API_PREFIX}/aadhaar-followups`, aadhaarFollowUpRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
