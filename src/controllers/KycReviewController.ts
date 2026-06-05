@@ -741,8 +741,16 @@ export class KycReviewController {
 
       // Sort
       rows.sort((a, b) => {
-        const aDate = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
-        const bDate = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+        const aTime = a.isManualUpload
+          ? (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
+          : (a.failedOn ? new Date(a.failedOn).getTime() : 0);
+        const bTime = b.isManualUpload
+          ? (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
+          : (b.failedOn ? new Date(b.failedOn).getTime() : 0);
+
+        const aDate = aTime || (a.registeredAt ? new Date(a.registeredAt).getTime() : 0);
+        const bDate = bTime || (b.registeredAt ? new Date(b.registeredAt).getTime() : 0);
+
         if (sortOrder === 'oldest') return aDate - bDate;
         return bDate - aDate;
       });
