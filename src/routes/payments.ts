@@ -19,10 +19,28 @@ router.get(
   PaymentController.listTransactions
 );
 
+router.patch(
+  '/transactions/:id/team-test',
+  requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
+  PaymentController.markTransactionTeamTest
+);
+
 router.get(
   '/payouts',
   requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
   PaymentController.listPayouts
+);
+
+router.patch(
+  '/payouts/:id/status',
+  requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
+  PaymentController.updatePayoutStatus
+);
+
+router.get(
+  '/users/:id/bank-accounts',
+  requirePermission(`${Resource.PAYMENT}.${Action.VIEW}`),
+  PaymentController.getUserBankAccounts
 );
 
 router.get(

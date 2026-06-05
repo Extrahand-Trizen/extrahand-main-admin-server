@@ -34,6 +34,11 @@ export class PaymentServiceClient {
     const response = await this.client.get(path, { params });
     return response.data;
   }
+
+  async patch(path: string, body: Record<string, any>): Promise<any> {
+    const response = await this.client.patch(path, body);
+    return response.data;
+  }
 }
 
 export const paymentServiceClient = new PaymentServiceClient();

@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import { AdminNotification } from '../models/AdminNotification';
+
+
 import { KycFollowUpStatus, KycReview, KycReviewStatus } from '../models/KycReview';
 import { KycSession } from '../models/KycSession';
 import { DashboardType } from '../types/dashboard';
@@ -298,7 +300,14 @@ async function getAadhaarDocuments(
 }
 
 async function buildReviewRows(req: Request) {
-  const notifications = await AdminNotification.find(notificationQuery(req))
+  // Notification-driven approach: only show users who have triggered an Aadhaar
+  // KYC review event (aadhaar_verification_failed or aadhaar_verification_under_review).
+  // This matches the production behavior (16 real reviews) vs the all-unverified-helpers
+  // approach that showed 20 including non-KYC-event users.
+  const notifications = await AdminNotification.find({
+    dashboardType: DashboardType.MAIN_ADMIN,
+    type: { $in: AADHAAR_NOTIFICATION_TYPES },
+  })
     .sort({ createdAt: -1 })
     .limit(500)
     .lean();
@@ -311,18 +320,12 @@ async function buildReviewRows(req: Request) {
   }
 
   const userIds = Array.from(latestByUserId.keys());
-  const reviewDocs = await KycReview.find({ userId: { $in: userIds } }).lean();
-  const reviewMap = new Map(
-    reviewDocs.map((review) => [
-      `${review.userId}:${review.sessionId || ''}`,
-      review,
-    ]),
-  );
-  const fallbackReviewMap = new Map(reviewDocs.map((review) => [review.userId, review]));
 
-  const rows = [];
+  // Resolve all user profiles and UIDs to avoid mismatches
+  const resolvedUserMap = new Map<string, { user: any; profileUid: string }>();
+  const allLookupIds = new Set<string>();
+
   for (const userId of userIds) {
-    const notification = latestByUserId.get(userId);
     let user: any = null;
     try {
       const result = await userServiceClient.getUser(userId, req.admin!.userId);
@@ -333,6 +336,28 @@ async function buildReviewRows(req: Request) {
         error: error.message,
       });
     }
+    const profileUid = resolveProfileUid(user, userId);
+    resolvedUserMap.set(userId, { user, profileUid });
+    allLookupIds.add(userId);
+    allLookupIds.add(profileUid);
+  }
+
+  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
+  const reviewMap = new Map<string, any>();
+  for (const review of reviewDocs) {
+    reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
+  }
+  const fallbackReviewMap = new Map<string, any>();
+  for (const review of reviewDocs) {
+    fallbackReviewMap.set(review.userId, review);
+  }
+
+  const rows = [];
+  for (const userId of userIds) {
+    const notification = latestByUserId.get(userId);
+    const resolved = resolvedUserMap.get(userId);
+    const user = resolved?.user || null;
+    const profileUid = resolved?.profileUid || userId;
 
     // aadhaarKyc.verificationId = the `verification_id` (eh_...) string stored in KycSession.
     // aadhaarKyc.id             = MongoDB _id — do NOT use for KycSession lookup.
@@ -344,8 +369,10 @@ async function buildReviewRows(req: Request) {
     );
     // sessionId is used for KycReview record keying (can be verificationId or a legacy id)
     const sessionId = verificationId || String(user?.aadhaarKyc?.id || '');
-    const exactReview = reviewMap.get(`${userId}:${sessionId}`) || null;
-    const previousReview = fallbackReviewMap.get(userId) || null;
+    
+    // Check both profileUid and unresolved userId keys in review maps
+    const exactReview = reviewMap.get(`${profileUid}:${sessionId}`) || reviewMap.get(`${userId}:${sessionId}`) || null;
+    const previousReview = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
     const review = exactReview || previousReview || null;
     const hasNewUploadAfterReview =
       !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
@@ -381,6 +408,7 @@ async function buildReviewRows(req: Request) {
       userName: user?.name || notification.metadata?.userName || 'Unknown user',
       userEmail: user?.email || notification.metadata?.userEmail || '',
       userPhone: user?.phone || notification.metadata?.userPhone || '',
+      registeredAt: String(user?.createdAt || user?.created_at || notification.createdAt || ''),
       aadhaar: getAadhaarStatus(user, notification) || 'Under Review',
       failureReason:
         user?.aadhaarKyc?.failureReason ||
@@ -390,8 +418,9 @@ async function buildReviewRows(req: Request) {
       failedOn:
         user?.aadhaarKyc?.visibleFailureAt ||
         user?.aadhaarKyc?.updatedAt ||
-        notification.createdAt,
-      aadhaarUpdatedAt: user?.aadhaarKyc?.updatedAt || notification.createdAt,
+        notification?.createdAt ||
+        null,
+      aadhaarUpdatedAt: user?.aadhaarKyc?.updatedAt || notification?.createdAt || null,
       followUpStatus: hasNewUploadAfterReview ? 'followup_uploaded' : review?.followUpStatus || 'none',
       followUpDate: review?.followUpDate || null,
       assignedTo,
@@ -399,7 +428,7 @@ async function buildReviewRows(req: Request) {
       reviewedBy: review?.reviewedBy || null,
       reviewedAt: review?.reviewedAt || null,
       sessionId,
-      verificationId: user?.aadhaarKyc?.verificationId || notification.metadata?.verificationId || '',
+      verificationId: user?.aadhaarKyc?.verificationId || notification?.metadata?.verificationId || '',
       isAadhaarVerified: isProfileAadhaarVerified(user),
       isManualUpload,
       uploadedBy,
@@ -656,6 +685,11 @@ export class KycReviewController {
       const search = String(req.query.search || '').trim().toLowerCase();
       const reviewStatus = String(req.query.reviewStatus || 'all').trim().toLowerCase();
       const followUpStatus = String(req.query.followUpStatus || 'all').trim().toLowerCase();
+      const includeVerified = String(req.query.includeVerified || 'false').trim().toLowerCase() === 'true';
+      const assignedTo = String(req.query.assignedTo || 'all').trim();
+      const sortOrder = String(req.query.sortOrder || 'newest').trim().toLowerCase();
+      const page = Math.max(1, parseInt(String(req.query.page || '1')));
+      const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
       let rows = await buildReviewRows(req);
 
@@ -676,8 +710,16 @@ export class KycReviewController {
         }
       }
 
+      if (!includeVerified) {
+        rows = rows.filter((row) => !row.isAadhaarVerified);
+      }
+
       if (followUpStatus !== 'all') {
         rows = rows.filter((row) => row.followUpStatus === followUpStatus);
+      }
+
+      if (assignedTo !== 'all') {
+        rows = rows.filter((row) => row.assignedTo.some((admin) => admin.userId === assignedTo));
       }
 
       if (search) {
@@ -697,14 +739,28 @@ export class KycReviewController {
         );
       }
 
+      // Sort
+      rows.sort((a, b) => {
+        const aDate = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+        const bDate = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+        if (sortOrder === 'oldest') return aDate - bDate;
+        return bDate - aDate;
+      });
+
+      // Paginate
+      const total = rows.length;
+      const startIndex = (page - 1) * limit;
+      const paginatedRows = rows.slice(startIndex, startIndex + limit);
+      const pages = Math.ceil(total / limit);
+
       res.json({
         success: true,
-        data: rows,
+        data: paginatedRows,
         pagination: {
-          page: 1,
-          limit: rows.length,
-          total: rows.length,
-          pages: 1,
+          page,
+          limit,
+          total,
+          pages,
         },
       });
     } catch (error: any) {
@@ -864,23 +920,31 @@ export class KycReviewController {
     try {
       const { userId } = req.params;
       const followUpStatus = normalizeFollowUpStatus(req.body?.followUpStatus);
-      if (!followUpStatus || followUpStatus === 'none') {
+      if (!followUpStatus) {
         res.status(400).json({ success: false, error: 'Valid follow-up status is required' });
         return;
       }
 
-      const followUpDate = req.body?.followUpDate ? new Date(req.body.followUpDate) : null;
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Update KYC follow-up user lookup failed', { userId, error: error.message });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+
+      let followUpDate = req.body?.followUpDate ? new Date(req.body.followUpDate) : null;
       if (followUpStatus === 'follow_up' && (!followUpDate || Number.isNaN(followUpDate.getTime()))) {
-        res.status(400).json({ success: false, error: 'Follow-up date is required' });
-        return;
+        followUpDate = new Date();
       }
 
-      const reviewStatus = normalizeReviewStatus(req.body?.reviewStatus) || 'rejected';
+      const reviewStatus = normalizeReviewStatus(req.body?.reviewStatus) || (followUpStatus === 'none' ? 'pending' : 'rejected');
       const review = await KycReview.findOneAndUpdate(
-        { userId, sessionId: req.body?.sessionId || '' },
+        { userId: profileUid, sessionId: req.body?.sessionId || '' },
         {
           $set: {
-            userId,
+            userId: profileUid,
             sessionId: req.body?.sessionId || '',
             verificationId: req.body?.verificationId || '',
             reviewStatus,
@@ -888,6 +952,7 @@ export class KycReviewController {
             followUpDate: followUpStatus === 'follow_up' ? followUpDate : null,
             reviewedBy: actor(req),
             reviewedAt: new Date(),
+            ...(reviewStatus === 'pending' ? { rejectionReason: '' } : {}),
           },
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },

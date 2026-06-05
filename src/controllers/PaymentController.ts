@@ -91,7 +91,7 @@ export class PaymentController {
         { success: true, total: 0, transactions: [] }
       );
 
-      const rawTransactions = data.transactions ?? [];
+      const rawTransactions = data.data ?? data.transactions ?? [];
       const userCache = new Map<string, { userId?: string; name?: string }>();
       const taskTitleCache = new Map<string, string>();
 
@@ -100,7 +100,8 @@ export class PaymentController {
       const uniqueTaskIds = new Set<string>();
 
       rawTransactions.forEach((row: any) => {
-        if (row.posterUid) uniqueUids.add(row.posterUid);
+        const posterUid = row.posterUid || row.CustomerUid;
+        if (posterUid) uniqueUids.add(posterUid);
         if (row.performerUid) uniqueUids.add(row.performerUid);
         if (row.taskId) uniqueTaskIds.add(row.taskId);
       });
@@ -186,19 +187,21 @@ export class PaymentController {
 
       const transactions = await Promise.all(
         rawTransactions.map(async (row: any) => {
+          const posterUid = row.posterUid || row.CustomerUid;
           const [customer, helper, taskTitle] = await Promise.all([
-            resolveUser(row.posterUid),
+            resolveUser(posterUid),
             resolveUser(row.performerUid),
             resolveTaskTitle(row.taskId),
           ]);
 
           return {
             ...row,
+            posterUid: posterUid,
             links: {
               customerUserId: customer.userId,
               helperUserId: helper.userId,
               taskId: row.taskId,
-              customerName: customer.name || row.posterUid,
+              customerName: customer.name || posterUid,
               taskTitle: taskTitle || row.taskId,
               helperName: helper.name || row.performerUid,
             },
@@ -209,13 +212,57 @@ export class PaymentController {
       res.json({
         success: true,
         data: transactions,
-        total: data.total ?? 0,
+        total: data.pagination?.total ?? data.total ?? 0,
       });
     } catch (error: any) {
       logger.error('List transactions error:', error);
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list transactions',
+      });
+    }
+  }
+
+  static async markTransactionTeamTest(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { teamTest } = req.body || {};
+      if (!id) {
+        throw new Error('Transaction id is required');
+      }
+      if (typeof teamTest !== 'boolean') {
+        throw new Error('teamTest must be a boolean');
+      }
+
+      const payload = await paymentServiceClient.patch(`/api/v1/dashboard/transactions/${id}/team-test`, { teamTest });
+      res.json({ success: true, data: payload });
+    } catch (error: any) {
+      logger.error('Mark transaction team test error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to update transaction test status',
+      });
+    }
+  }
+
+  static async updatePayoutStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { status } = req.body || {};
+      if (!id) {
+        throw new Error('Payout id is required');
+      }
+      if (!status || typeof status !== 'string') {
+        throw new Error('status is required');
+      }
+
+      const payload = await paymentServiceClient.patch(`/api/v1/dashboard/payouts/${id}/status`, { status });
+      res.json({ success: true, data: payload });
+    } catch (error: any) {
+      logger.error('Update payout status error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to update payout status',
       });
     }
   }
@@ -237,12 +284,12 @@ export class PaymentController {
         total: 0,
       });
 
-      const rawRows = data.payouts ?? data.items ?? [];
+      const rawRows = data.data ?? data.payouts ?? data.items ?? [];
       const rows = rawRows.map((row: any) => ({
         payoutId: row.payoutId,
         performerUid: row.performerUid,
         taskId: row.taskId || row.escrow?.taskId || null,
-        CustomerUid: row.escrow?.posterUid || null,
+        CustomerUid: row.CustomerUid || row.escrow?.posterUid || null,
         amount: String(row.amount ?? ''),
         netAmount: String(row.netAmount ?? ''),
         status: row.status,
@@ -254,7 +301,7 @@ export class PaymentController {
       res.json({
         success: true,
         data: rows,
-        total: data.total ?? rows.length,
+        total: data.pagination?.total ?? data.total ?? rows.length,
       });
     } catch (error: any) {
       logger.error('List payouts error:', error);
@@ -303,6 +350,32 @@ export class PaymentController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to list ledger',
+      });
+    }
+  }
+
+  static async getUserBankAccounts(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        throw new Error('User id is required');
+      }
+      const data = await safeGet<any>(
+        `/api/v1/admin/users/${id}/financial-profile`,
+        undefined,
+        { success: true, bankAccounts: [] }
+      );
+      res.json({
+        success: true,
+        data: {
+          bankAccounts: data?.bankAccounts ?? [],
+        },
+      });
+    } catch (error: any) {
+      logger.error('Get user bank accounts error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to fetch user bank accounts',
       });
     }
   }
