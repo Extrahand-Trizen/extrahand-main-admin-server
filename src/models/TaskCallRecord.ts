@@ -5,7 +5,8 @@ export type TaskCallStatus =
   | 'genuine'
   | 'not_genuine'
   | 'call_not_lifted'
-  | 'follow_up';
+  | 'follow_up'
+  | 'completed';
 
 export interface TaskCallNote {
   note: string;
@@ -56,7 +57,7 @@ const TaskCallRecordSchema = new Schema<TaskCallRecordDocument>(
     notificationId: { type: String },
     status: {
       type: String,
-      enum: ['not_updated', 'genuine', 'not_genuine', 'call_not_lifted', 'follow_up'],
+      enum: ['not_updated', 'genuine', 'not_genuine', 'call_not_lifted', 'follow_up', 'completed'],
       default: 'not_updated',
       required: true,
     },

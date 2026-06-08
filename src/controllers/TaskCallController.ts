@@ -12,6 +12,7 @@ const STATUSES: TaskCallStatus[] = [
   'not_genuine',
   'call_not_lifted',
   'follow_up',
+  'completed',
 ];
 
 const TASK_CALL_EXCLUDED_EMAILS = [
