@@ -16,7 +16,6 @@ const STATUSES: TaskCallStatus[] = [
 
 const TASK_CALL_EXCLUDED_EMAILS = [
   'nukaraju@trizenventures.com',
-  'asishvenkat.a2004@gmail.com',
 ];
 
 function isOperationsAdmin(req: Request): boolean {
