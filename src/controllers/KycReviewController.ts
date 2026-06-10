@@ -224,6 +224,8 @@ async function getAadhaarDocuments(
   user: any,
   verificationId: string,
   userId: string,
+  /** Admin-upload session ID (admin_upload_...) — searched as a separate MinIO prefix */
+  adminSessionId?: string,
 ): Promise<Array<{ label: string; url: string }>> {
   if (minioService.isReady) {
     try {
@@ -233,8 +235,31 @@ async function getAadhaarDocuments(
       };
       const sessionSort = { updatedAt: -1, createdAt: -1 } as const;
 
-      // Prefer exact verification_id match, then fall back to latest OCR session for user.
-      let session = verificationId
+      // 1. If this is an admin-upload session, search that MinIO prefix first.
+      //    Admin uploads store objects under aadhaar-ocr/{userId}/{adminSessionId}/
+      //    and never create a KycSession record, so skip the DB lookup entirely.
+      if (adminSessionId && adminSessionId.startsWith('admin_upload_')) {
+        const adminKeys = await getVaultKeysForSession(userId, adminSessionId, undefined);
+        if (adminKeys.length > 0) {
+          const adminDocs = await minioService.getPresignedUrls(adminKeys);
+          if (adminDocs.length > 0) {
+            logger.debug('KycReviewController: served admin-upload images from vault', {
+              adminSessionId,
+              userId,
+              count: adminDocs.length,
+            });
+            return adminDocs;
+          }
+        }
+        logger.warn('KycReviewController: admin-upload session had no vault images', {
+          adminSessionId,
+          userId,
+        });
+      }
+
+      // 2. Prefer exact verification_id match (DigiLocker / OCR sessions), then fall
+      //    back to the latest OCR session for the user.
+      let session = verificationId && !verificationId.startsWith('admin_upload_')
         ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
             .sort(sessionSort)
             .lean()
@@ -249,7 +274,7 @@ async function getAadhaarDocuments(
           .lean();
       }
 
-      if (session?.ocr || verificationId) {
+      if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
         const keysToSign = await getVaultKeysForSession(
           userId,
           verificationId,
@@ -395,12 +420,26 @@ async function buildReviewRows(req: Request) {
         ]
       : [];
 
-    // Resolve presigned Aadhaar image URLs from the KYC vault using the correct verificationId
-    const documents = await getAadhaarDocuments(user, verificationId, userId);
-
-    // Detect manual admin-upload sessions (sessionId starts with "admin_upload_")
+    // Detect manual admin-upload sessions (sessionId starts with "admin_upload_").
+    // The review document holds the canonical admin sessionId even when verificationId
+    // points to an older DigiLocker session, so we must use it for MinIO lookup.
     const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
     const uploadedBy = review?.uploadedBy || null;
+
+    // Resolve the admin upload session ID from the review record if available.
+    // This ensures we always look in the correct MinIO prefix for admin uploads,
+    // even when the user also has a prior DigiLocker verificationId.
+    const adminSessionId =
+      (review?.sessionId && String(review.sessionId).startsWith('admin_upload_')
+        ? review.sessionId
+        : undefined) ||
+      (notification?.metadata?.sessionId && String(notification.metadata.sessionId).startsWith('admin_upload_')
+        ? notification.metadata.sessionId
+        : undefined);
+
+    // Resolve presigned Aadhaar image URLs from the KYC vault.
+    // For admin uploads, adminSessionId takes priority over verificationId.
+    const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
 
     rows.push({
       notificationId: String(notification._id),
