@@ -366,7 +366,6 @@ export class NotificationController {
         success: true,
         data: {
           notificationId: result.notificationId,
-          assignedTo: result.assignedTo,
           targetAdminUserIds: result.targetAdminUserIds,
         },
       });

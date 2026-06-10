@@ -2,15 +2,14 @@ import { Request, Response } from 'express';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import { AdminNotification } from '../models/AdminNotification';
-
-
+import { AdminUser } from '../models/AdminUser';
 import { KycFollowUpStatus, KycReview, KycReviewStatus } from '../models/KycReview';
 import { KycSession } from '../models/KycSession';
 import { DashboardType } from '../types/dashboard';
 import { userServiceClient } from '../services/UserServiceClient';
 import { minioService } from '../services/MinioService';
-import { ensureKycAssigneeForUser } from '../services/AadhaarKycRecipientService';
 import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
+import { listAllAadhaarKycAdmins } from '../services/AadhaarKycRecipientService';
 
 const AADHAAR_NOTIFICATION_TYPES = [
   'aadhaar_verification_failed',
@@ -346,25 +345,30 @@ async function buildReviewRows(req: Request) {
 
   const userIds = Array.from(latestByUserId.keys());
 
-  // Resolve all user profiles and UIDs to avoid mismatches
+  // Resolve all user profiles and UIDs to avoid mismatches in parallel
+  const resolvedUsers = await Promise.all(
+    userIds.map(async (userId) => {
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('KYC review user enrichment failed', {
+          userId,
+          error: error.message,
+        });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+      return { userId, user, profileUid };
+    })
+  );
+
   const resolvedUserMap = new Map<string, { user: any; profileUid: string }>();
   const allLookupIds = new Set<string>();
-
-  for (const userId of userIds) {
-    let user: any = null;
-    try {
-      const result = await userServiceClient.getUser(userId, req.admin!.userId);
-      user = result?.data || result;
-    } catch (error: any) {
-      logger.warn('KYC review user enrichment failed', {
-        userId,
-        error: error.message,
-      });
-    }
-    const profileUid = resolveProfileUid(user, userId);
-    resolvedUserMap.set(userId, { user, profileUid });
-    allLookupIds.add(userId);
-    allLookupIds.add(profileUid);
+  for (const item of resolvedUsers) {
+    resolvedUserMap.set(item.userId, { user: item.user, profileUid: item.profileUid });
+    allLookupIds.add(item.userId);
+    allLookupIds.add(item.profileUid);
   }
 
   const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
@@ -377,8 +381,7 @@ async function buildReviewRows(req: Request) {
     fallbackReviewMap.set(review.userId, review);
   }
 
-  const rows = [];
-  for (const userId of userIds) {
+  const rowPromises = userIds.map(async (userId) => {
     const notification = latestByUserId.get(userId);
     const resolved = resolvedUserMap.get(userId);
     const user = resolved?.user || null;
@@ -402,23 +405,8 @@ async function buildReviewRows(req: Request) {
     const hasNewUploadAfterReview =
       !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
 
-    const assignee = await ensureKycAssigneeForUser(userId);
-    if (!isAllReviewsRole(req)) {
-      const myId = req.admin?.userId;
-      if (!assignee || assignee.userId !== myId) {
-        continue;
-      }
-    }
-
-    const assignedTo = assignee
-      ? [
-          {
-            userId: assignee.userId,
-            name: assignee.name,
-            email: assignee.email,
-          },
-        ]
-      : [];
+    const claimedBy = review?.claimedBy || null;
+    const claimedAt = review?.claimedAt || null;
 
     // Detect manual admin-upload sessions (sessionId starts with "admin_upload_").
     // The review document holds the canonical admin sessionId even when verificationId
@@ -439,9 +427,9 @@ async function buildReviewRows(req: Request) {
 
     // Resolve presigned Aadhaar image URLs from the KYC vault.
     // For admin uploads, adminSessionId takes priority over verificationId.
-    const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
+    const documents: any[] = [];
 
-    rows.push({
+    return {
       notificationId: String(notification._id),
       userId,
       userName: user?.name || notification.metadata?.userName || 'Unknown user',
@@ -462,7 +450,8 @@ async function buildReviewRows(req: Request) {
       aadhaarUpdatedAt: user?.aadhaarKyc?.updatedAt || notification?.createdAt || null,
       followUpStatus: hasNewUploadAfterReview ? 'followup_uploaded' : review?.followUpStatus || 'none',
       followUpDate: review?.followUpDate || null,
-      assignedTo,
+      claimedBy,
+      claimedAt,
       reviewStatus: hasNewUploadAfterReview ? 'pending' : review?.reviewStatus || 'pending',
       reviewedBy: review?.reviewedBy || null,
       reviewedAt: review?.reviewedAt || null,
@@ -474,9 +463,10 @@ async function buildReviewRows(req: Request) {
       uploadedAt: review?.uploadedAt || null,
       documents,
       profileUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
-    });
-  }
+    };
+  });
 
+  const rows = await Promise.all(rowPromises);
   return rows;
 }
 
@@ -558,6 +548,8 @@ export class KycReviewController {
             uploadedAt: null,
             reviewStatus: null,
             nextSessionId,
+            claimedBy: null,
+            claimedAt: null,
           },
         });
         return;
@@ -571,6 +563,8 @@ export class KycReviewController {
           uploadedAt: review.updatedAt,
           reviewStatus: review.reviewStatus,
           nextSessionId,
+          claimedBy: review.claimedBy || null,
+          claimedAt: review.claimedAt || null,
         },
       });
     } catch (error: any) {
@@ -584,6 +578,14 @@ export class KycReviewController {
 
     try {
       const { userId } = req.params;
+
+      // Restrict upload if claimed by someone else
+      const review = await KycReview.findOne({ userId }).sort({ updatedAt: -1 }).lean();
+      if (review && review.claimedBy && review.claimedBy.userId !== req.admin!.userId && !req.admin!.isSuperAdmin) {
+        res.status(403).json({ success: false, error: 'This review is claimed by another admin' });
+        return;
+      }
+
       const side = String(req.body?.side || '').trim().toLowerCase();
 
       if (!isValidSide(side)) {
@@ -689,7 +691,6 @@ export class KycReviewController {
           logger.info('Aadhaar under_review notification sent after admin upload', {
             userId,
             notificationId: notifResult.notificationId,
-            assignedTo: notifResult.assignedTo?.email,
           });
         } catch (notifErr: any) {
           logger.warn('Failed to send aadhaar_verification_under_review notification', {
@@ -725,12 +726,16 @@ export class KycReviewController {
       const reviewStatus = String(req.query.reviewStatus || 'all').trim().toLowerCase();
       const followUpStatus = String(req.query.followUpStatus || 'all').trim().toLowerCase();
       const includeVerified = String(req.query.includeVerified || 'false').trim().toLowerCase() === 'true';
-      const assignedTo = String(req.query.assignedTo || 'all').trim();
       const sortOrder = String(req.query.sortOrder || 'newest').trim().toLowerCase();
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
       let rows = await buildReviewRows(req);
+
+      // Filter: operations admin only sees unclaimed reviews
+      if (!req.admin?.isSuperAdmin) {
+        rows = rows.filter((row) => !row.claimedBy);
+      }
 
       if (reviewStatus !== 'all') {
         if (isAcceptedFilter(reviewStatus)) {
@@ -757,10 +762,6 @@ export class KycReviewController {
         rows = rows.filter((row) => row.followUpStatus === followUpStatus);
       }
 
-      if (assignedTo !== 'all') {
-        rows = rows.filter((row) => row.assignedTo.some((admin) => admin.userId === assignedTo));
-      }
-
       if (search) {
         rows = rows.filter((row) =>
           [
@@ -770,7 +771,7 @@ export class KycReviewController {
             row.userId,
             row.aadhaar,
             row.failureReason,
-            row.assignedTo.map((item) => `${item.name} ${item.email}`).join(' '),
+            row.claimedBy ? `${row.claimedBy.name} ${row.claimedBy.email}` : '',
           ]
             .join(' ')
             .toLowerCase()
@@ -1009,6 +1010,284 @@ export class KycReviewController {
     } catch (error: any) {
       logger.error('Update KYC follow-up error:', error);
       res.status(500).json({ success: false, error: 'Failed to update follow-up status' });
+    }
+  }
+
+  static async claim(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+    try {
+      const { userId } = req.params;
+      const { sessionId } = req.body || {};
+
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Claim KYC review: user lookup failed', { userId, error: error.message });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+
+      const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
+      let review = await KycReview.findOne(query).sort({ updatedAt: -1 });
+
+      if (review && review.claimedBy && review.claimedBy.userId !== req.admin!.userId) {
+        res.status(409).json({ success: false, error: `Review is already claimed by ${review.claimedBy.name}` });
+        return;
+      }
+
+      const adminActor = actor(req);
+      if (!review) {
+        review = new KycReview({
+          userId: profileUid,
+          sessionId: sessionId || '',
+          reviewStatus: 'pending',
+          followUpStatus: 'none',
+          claimedBy: adminActor,
+          claimedAt: new Date(),
+        });
+        await review.save();
+      } else {
+        review.claimedBy = adminActor;
+        review.claimedAt = new Date();
+        await review.save();
+      }
+
+      res.json({ success: true, data: review });
+    } catch (error: any) {
+      logger.error('Claim KYC review error:', error);
+      res.status(500).json({ success: false, error: 'Failed to claim KYC review' });
+    }
+  }
+
+  static async unclaim(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+    try {
+      const { userId } = req.params;
+      const { sessionId } = req.body || {};
+
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Unclaim KYC review: user lookup failed', { userId, error: error.message });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+
+      const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
+      const review = await KycReview.findOne(query).sort({ updatedAt: -1 });
+
+      if (!review) {
+        res.status(404).json({ success: false, error: 'KYC review not found' });
+        return;
+      }
+
+      if (review.claimedBy && review.claimedBy.userId !== req.admin!.userId && !req.admin!.isSuperAdmin) {
+        res.status(403).json({ success: false, error: 'You are not the claimer of this review' });
+        return;
+      }
+
+      review.claimedBy = undefined;
+      review.claimedAt = undefined;
+      await review.save();
+
+      res.json({ success: true, data: review });
+    } catch (error: any) {
+      logger.error('Unclaim KYC review error:', error);
+      res.status(500).json({ success: false, error: 'Failed to unclaim KYC review' });
+    }
+  }
+
+  static async transfer(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+    try {
+      const { userId } = req.params;
+      const { sessionId, targetAdminUserId } = req.body || {};
+
+      if (!targetAdminUserId) {
+        res.status(400).json({ success: false, error: 'targetAdminUserId is required' });
+        return;
+      }
+
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Transfer KYC review: user lookup failed', { userId, error: error.message });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+
+      const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
+      const review = await KycReview.findOne(query).sort({ updatedAt: -1 });
+
+      if (!review) {
+        res.status(404).json({ success: false, error: 'KYC review not found' });
+        return;
+      }
+
+      if (review.claimedBy && review.claimedBy.userId !== req.admin!.userId && !req.admin!.isSuperAdmin) {
+        res.status(403).json({ success: false, error: 'You are not the claimer of this review' });
+        return;
+      }
+
+      const targetAdmin = await AdminUser.findOne({ userId: targetAdminUserId, status: 'active' }).lean();
+      if (!targetAdmin) {
+        res.status(404).json({ success: false, error: 'Target admin not found or inactive' });
+        return;
+      }
+
+      review.claimedBy = {
+        userId: targetAdmin.userId,
+        email: targetAdmin.email,
+        name: targetAdmin.name,
+      };
+      review.claimedAt = new Date();
+      await review.save();
+
+      res.json({ success: true, data: review });
+    } catch (error: any) {
+      logger.error('Transfer KYC review error:', error);
+      res.status(500).json({ success: false, error: 'Failed to transfer KYC review' });
+    }
+  }
+
+  static async myClaims(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+
+    try {
+      const search = String(req.query.search || '').trim().toLowerCase();
+      const reviewStatus = String(req.query.reviewStatus || 'all').trim().toLowerCase();
+      const followUpStatus = String(req.query.followUpStatus || 'all').trim().toLowerCase();
+      const includeVerified = String(req.query.includeVerified || 'false').trim().toLowerCase() === 'true';
+      const sortOrder = String(req.query.sortOrder || 'newest').trim().toLowerCase();
+      const page = Math.max(1, parseInt(String(req.query.page || '1')));
+      const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
+
+      let rows = await buildReviewRows(req);
+
+      rows = rows.filter((row) => row.claimedBy?.userId === req.admin!.userId);
+
+      if (reviewStatus !== 'all') {
+        if (isAcceptedFilter(reviewStatus)) {
+          rows = rows.filter((row) => row.reviewStatus === 'accepted' || row.isAadhaarVerified);
+        } else if (isRejectedFilter(reviewStatus)) {
+          rows = rows.filter((row) => row.reviewStatus === 'rejected');
+        } else if (reviewStatus === 'pending') {
+          rows = rows.filter(
+            (row) =>
+              !row.isAadhaarVerified &&
+              row.reviewStatus !== 'accepted' &&
+              row.reviewStatus !== 'rejected',
+          );
+        } else {
+          rows = rows.filter((row) => row.reviewStatus === reviewStatus);
+        }
+      }
+
+      if (!includeVerified) {
+        rows = rows.filter((row) => !row.isAadhaarVerified);
+      }
+
+      if (followUpStatus !== 'all') {
+        rows = rows.filter((row) => row.followUpStatus === followUpStatus);
+      }
+
+      if (search) {
+        rows = rows.filter((row) =>
+          [
+            row.userName,
+            row.userEmail,
+            row.userPhone,
+            row.userId,
+            row.aadhaar,
+            row.failureReason,
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(search),
+        );
+      }
+
+      // Sort
+      rows.sort((a, b) => {
+        const aTime = a.isManualUpload
+          ? (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
+          : (a.failedOn ? new Date(a.failedOn).getTime() : 0);
+        const bTime = b.isManualUpload
+          ? (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
+          : (b.failedOn ? new Date(b.failedOn).getTime() : 0);
+
+        const aDate = aTime || (a.registeredAt ? new Date(a.registeredAt).getTime() : 0);
+        const bDate = bTime || (b.registeredAt ? new Date(b.registeredAt).getTime() : 0);
+
+        if (sortOrder === 'oldest') return aDate - bDate;
+        return bDate - aDate;
+      });
+
+      const total = rows.length;
+      const startIndex = (page - 1) * limit;
+      const paginatedRows = rows.slice(startIndex, startIndex + limit);
+      const pages = Math.ceil(total / limit);
+
+      res.json({
+        success: true,
+        data: paginatedRows,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages,
+        },
+      });
+    } catch (error: any) {
+      logger.error('List my KYC claims error:', error);
+      res.status(500).json({ success: false, error: 'Failed to list my KYC claims' });
+    }
+  }
+
+  static async getDocuments(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+    try {
+      const { userId } = req.params;
+      const sessionId = String(req.query.sessionId || '').trim();
+      const verificationId = String(req.query.verificationId || '').trim();
+
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('Get KYC documents user lookup failed', { userId, error: error.message });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+
+      const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
+      const review = await KycReview.findOne(query).sort({ updatedAt: -1 }).lean();
+
+      const adminSessionId =
+        (review?.sessionId && String(review.sessionId).startsWith('admin_upload_')
+          ? review.sessionId
+          : undefined) ||
+        (sessionId.startsWith('admin_upload_') ? sessionId : undefined);
+
+      const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
+      res.json({ success: true, data: documents });
+    } catch (error: any) {
+      logger.error('Get KYC documents error:', error);
+      res.status(500).json({ success: false, error: 'Failed to get Aadhaar documents' });
+    }
+  }
+
+  static async listOpsAdmins(req: Request, res: Response): Promise<void> {
+    if (!requireKycReviewAccess(req, res)) return;
+    try {
+      const admins = await listAllAadhaarKycAdmins();
+      res.json({ success: true, data: admins });
+    } catch (error: any) {
+      logger.error('List ops admins error:', error);
+      res.status(500).json({ success: false, error: 'Failed to list operations admins' });
     }
   }
 }

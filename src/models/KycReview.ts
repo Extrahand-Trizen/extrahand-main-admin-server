@@ -24,6 +24,13 @@ export interface KycReviewDocument extends Document {
     name: string;
   };
   uploadedAt?: Date;
+  /** The ops admin who has claimed this review for processing */
+  claimedBy?: {
+    userId: string;
+    email: string;
+    name: string;
+  };
+  claimedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,11 +67,14 @@ const KycReviewSchema = new Schema<KycReviewDocument>(
     reviewedAt: { type: Date },
     uploadedBy: { type: ReviewerSchema },
     uploadedAt: { type: Date },
+    claimedBy: { type: ReviewerSchema },
+    claimedAt: { type: Date },
   },
   { timestamps: true },
 );
 
 KycReviewSchema.index({ userId: 1, sessionId: 1 }, { unique: true, sparse: true });
 KycReviewSchema.index({ reviewStatus: 1, followUpStatus: 1, updatedAt: -1 });
+KycReviewSchema.index({ 'claimedBy.userId': 1, updatedAt: -1 });
 
 export const KycReview = mongoose.model<KycReviewDocument>('KycReview', KycReviewSchema);

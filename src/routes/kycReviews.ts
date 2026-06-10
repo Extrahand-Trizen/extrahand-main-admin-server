@@ -20,7 +20,13 @@ const aadhaarUpload = multer({
 router.use(verifyAuth);
 
 router.get('/', KycReviewController.list);
+router.get('/my-claims', KycReviewController.myClaims);
+router.get('/ops-admins', KycReviewController.listOpsAdmins);
+router.get('/:userId/documents', KycReviewController.getDocuments);
 router.get('/:userId/upload-status', KycReviewController.getUploadStatus);
+router.post('/:userId/claim', KycReviewController.claim);
+router.post('/:userId/unclaim', KycReviewController.unclaim);
+router.post('/:userId/transfer', KycReviewController.transfer);
 router.post('/:userId/accept', KycReviewController.accept);
 router.post('/:userId/reject', KycReviewController.reject);
 router.patch('/:userId/follow-up', KycReviewController.updateFollowUp);

@@ -3,8 +3,7 @@ import { AdminNotification } from '../models/AdminNotification';
 import { DashboardType } from '../types/dashboard';
 import {
   buildKycReviewLinkUrl,
-  ensureKycAssigneeForUser,
-  persistAadhaarKycAssignment,
+  listAllAadhaarKycAdmins,
 } from './AadhaarKycRecipientService';
 
 export type AadhaarKycNotificationPayload = {
@@ -46,24 +45,23 @@ export async function createAadhaarKycAdminNotification(
   created: boolean;
   targetAdminUserIds: string[];
   notificationId?: string;
-  assignedTo?: { userId: string; email: string; name: string };
 }> {
   const userId = String(payload.userId || '').trim();
   if (!userId) {
     return { created: false, targetAdminUserIds: [] };
   }
 
-  const recipient = await ensureKycAssigneeForUser(userId);
-  if (!recipient) {
-    logger.warn('No Aadhaar KYC ops recipient for notification', {
+  const admins = await listAllAadhaarKycAdmins();
+  const targetAdminUserIds = admins.map((a) => a.userId);
+
+  if (targetAdminUserIds.length === 0) {
+    logger.warn('No Aadhaar KYC ops admins found for notification broadcast', {
       userId,
       type: payload.type,
     });
-    return { created: false, targetAdminUserIds: [] };
   }
 
   const content = buildAadhaarNotificationContent(payload);
-  const targetAdminUserIds = [recipient.userId];
   const linkUrl = buildKycReviewLinkUrl(userId);
   const metadata = {
     userId,
@@ -75,9 +73,6 @@ export async function createAadhaarKycAdminNotification(
     verificationId: payload.verificationId,
     sessionId: payload.sessionId,
     occurredAt: payload.occurredAt || new Date().toISOString(),
-    assignedToUserId: recipient.userId,
-    assignedToEmail: recipient.email,
-    assignedToName: recipient.name,
   };
 
   const recentCutoff = new Date(Date.now() - 10 * 60 * 1000);
@@ -103,16 +98,10 @@ export async function createAadhaarKycAdminNotification(
         },
       },
     );
-    await persistAadhaarKycAssignment({
-      userId,
-      recipient,
-      notificationId: String(recent._id),
-    });
     return {
       created: true,
       targetAdminUserIds,
       notificationId: String(recent._id),
-      assignedTo: recipient,
     };
   }
 
@@ -127,24 +116,17 @@ export async function createAadhaarKycAdminNotification(
   });
 
   const notificationId = String(createdNotification._id);
-  await persistAadhaarKycAssignment({
-    userId,
-    recipient,
-    notificationId,
-  });
 
-  logger.info('Aadhaar KYC notification assigned (round-robin / sticky)', {
+  logger.info('Aadhaar KYC notification broadcasted to all ops admins', {
     notificationId,
     userId,
     type: payload.type,
-    assignedToUserId: recipient.userId,
-    assignedToEmail: recipient.email,
+    targetAdminUserIds,
   });
 
   return {
     created: true,
     targetAdminUserIds,
     notificationId,
-    assignedTo: recipient,
   };
 }

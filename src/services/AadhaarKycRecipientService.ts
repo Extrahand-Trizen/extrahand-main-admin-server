@@ -186,3 +186,23 @@ export async function ensureKycAssigneeForUser(
   await repairLegacyAadhaarNotificationsForUser(userId, recipient);
   return recipient;
 }
+
+export async function listAllAadhaarKycAdmins(): Promise<AadhaarKycRecipient[]> {
+  const admins = await AdminUser.find({
+    status: 'active',
+  })
+    .select('userId email name dashboardAccess')
+    .lean();
+
+  const results: AadhaarKycRecipient[] = [];
+  for (const admin of admins) {
+    if (hasActiveMainAdminOpsAccess(admin)) {
+      results.push({
+        userId: admin.userId,
+        email: normalizeAdminEmail(admin.email),
+        name: resolveAssignedDisplayName(normalizeAdminEmail(admin.email), admin.name),
+      });
+    }
+  }
+  return results;
+}
