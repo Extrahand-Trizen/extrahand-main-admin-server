@@ -418,14 +418,23 @@ async function buildReviewRows(req: Request) {
     allLookupIds.add(item.profileUid);
   }
 
-  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
+  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } })
+    .sort({ updatedAt: -1 })
+    .lean();
   const reviewMap = new Map<string, any>();
   for (const review of reviewDocs) {
     reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
+    // Always map userId → latest review (sorted by updatedAt -1)
+    if (!reviewMap.has(review.userId)) {
+      reviewMap.set(review.userId, review);
+    }
   }
   const fallbackReviewMap = new Map<string, any>();
   for (const review of reviewDocs) {
-    fallbackReviewMap.set(review.userId, review);
+    // Keep only the first (latest) per userId
+    if (!fallbackReviewMap.has(review.userId)) {
+      fallbackReviewMap.set(review.userId, review);
+    }
   }
 
   const rowPromises = userIds.map(async (userId) => {
@@ -575,14 +584,23 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
     allLookupIds.add(item.profileUid);
   }
 
-  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
+  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } })
+    .sort({ updatedAt: -1 })
+    .lean();
   const reviewMap = new Map<string, any>();
   for (const review of reviewDocs) {
     reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
+    // Always map userId → latest review (sorted by updatedAt -1)
+    if (!reviewMap.has(review.userId)) {
+      reviewMap.set(review.userId, review);
+    }
   }
   const fallbackReviewMap = new Map<string, any>();
   for (const review of reviewDocs) {
-    fallbackReviewMap.set(review.userId, review);
+    // Keep only the first (latest) per userId
+    if (!fallbackReviewMap.has(review.userId)) {
+      fallbackReviewMap.set(review.userId, review);
+    }
   }
 
   const rowPromises = uniqueUserIds.map(async (userId) => {
