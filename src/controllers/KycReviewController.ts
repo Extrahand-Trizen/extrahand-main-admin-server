@@ -466,10 +466,15 @@ async function buildReviewRows(req: Request) {
         '',
       failedOn:
         user?.aadhaarKyc?.visibleFailureAt ||
-        user?.aadhaarKyc?.updatedAt ||
         notification?.createdAt ||
+        user?.aadhaarKyc?.updatedAt ||
         null,
-      aadhaarUpdatedAt: user?.aadhaarKyc?.updatedAt || notification?.createdAt || null,
+      // Use notification.createdAt as the primary sort key — this is the immutable
+      // timestamp of the KYC event (failure / under-review trigger). Falling back to
+      // aadhaarKyc.updatedAt only when no notification exists (e.g. KycSession-only rows).
+      // Do NOT prefer aadhaarKyc.updatedAt first: it gets mutated whenever an admin
+      // verifies/accepts the user, causing accepted users to sort above pending ones.
+      aadhaarUpdatedAt: notification?.createdAt || user?.aadhaarKyc?.updatedAt || null,
       followUpStatus: hasNewUploadAfterReview ? 'followup_uploaded' : review?.followUpStatus || 'none',
       followUpDate: review?.followUpDate || null,
       claimedBy,
@@ -606,10 +611,11 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
         '',
       failedOn:
         user?.aadhaarKyc?.visibleFailureAt ||
-        user?.aadhaarKyc?.updatedAt ||
         notification?.createdAt ||
+        user?.aadhaarKyc?.updatedAt ||
         null,
-      aadhaarUpdatedAt: user?.aadhaarKyc?.updatedAt || notification?.createdAt || null,
+      // Same fix as buildReviewRows: prefer notification.createdAt (immutable event time).
+      aadhaarUpdatedAt: notification?.createdAt || user?.aadhaarKyc?.updatedAt || null,
       followUpStatus: hasNewUploadAfterReview ? 'followup_uploaded' : review?.followUpStatus || 'none',
       followUpDate: review?.followUpDate || null,
       claimedBy,
