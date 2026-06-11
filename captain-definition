@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "dockerfilePath": "./Dockerfile",
   "buildArguments": {
-    "CACHE_BUST": "build-2026-06-11-correct-appname"
+    "CACHE_BUST": "rebuild-2026-06-11-fresh-cache"
   },
   "expose": {
     "api": {
