@@ -171,15 +171,18 @@ async function getVaultKeysForSession(
   verificationId: string,
   sessionOcr?: { frontImageKey?: string; backImageKey?: string },
 ): Promise<Array<{ key: string; label: string }>> {
+  logger.debug('getVaultKeysForSession called', { userId, verificationId, hasSessionOcr: !!sessionOcr });
   const merged = new Map<string, { key: string; label: string }>();
 
   if (sessionOcr?.frontImageKey) {
+    logger.debug('Adding sessionOcr frontImageKey', { key: sessionOcr.frontImageKey });
     merged.set(sessionOcr.frontImageKey, {
       key: sessionOcr.frontImageKey,
       label: 'Aadhaar front',
     });
   }
   if (sessionOcr?.backImageKey) {
+    logger.debug('Adding sessionOcr backImageKey', { key: sessionOcr.backImageKey });
     merged.set(sessionOcr.backImageKey, {
       key: sessionOcr.backImageKey,
       label: 'Aadhaar back',
@@ -188,8 +191,11 @@ async function getVaultKeysForSession(
 
   if (verificationId && userId) {
     const prefix = buildVaultSessionPrefix(userId, verificationId);
+    logger.debug('Searching MinIO prefix for vault keys', { userId, verificationId, prefix });
     const objects = await minioService.listObjectKeys(prefix);
+    logger.debug('MinIO listObjectKeys result', { prefix, objectCount: objects.length, objects });
     for (const item of pickLatestVaultSideKeys(objects)) {
+      logger.debug('Adding vault key from MinIO', { key: item.key, label: item.label });
       merged.set(item.key, item);
     }
   }
@@ -201,6 +207,7 @@ async function getVaultKeysForSession(
     else ordered.push(item);
   }
 
+  logger.debug('getVaultKeysForSession result', { verificationId, finalKeysCount: ordered.length, keys: ordered.map(k => ({ key: k.key, label: k.label })) });
   return ordered.sort((a, b) => {
     const rank = (label: string) =>
       label === 'Aadhaar front' ? 0 : label === 'Aadhaar back' ? 1 : 2;
@@ -236,68 +243,75 @@ async function getAadhaarDocuments(
 
       // 1. If this is an admin-upload session, search that MinIO prefix ONLY.
       //    Admin uploads store objects under aadhaar-ocr/{userId}/{adminSessionId}/
-      //    When admin upload exists, we must NOT fall back to old KycSession images
-      //    to avoid showing stale data after re-uploads.
+      //    When admin upload exists AND has images, return them immediately.
+      //    This prevents old KycSession images from shadowing fresh uploads.
       if (adminSessionId && adminSessionId.startsWith('admin_upload_')) {
+        logger.info('🔍 Admin upload session detected', { adminSessionId, userId });
         const adminKeys = await getVaultKeysForSession(userId, adminSessionId, undefined);
+        logger.info('📋 Admin vault keys lookup result', { adminSessionId, userId, keyCount: adminKeys.length, keys: adminKeys.map((k: any) => k.key) });
         if (adminKeys.length > 0) {
           const adminDocs = await minioService.getPresignedUrls(adminKeys);
+          logger.info('🔗 Presigned URLs generated from admin keys', { adminSessionId, userId, urlCount: adminDocs.length });
           if (adminDocs.length > 0) {
-            logger.debug('KycReviewController: served admin-upload images from vault', {
+            logger.info('✅ RETURNING admin-upload images from vault', {
               adminSessionId,
               userId,
               count: adminDocs.length,
+              labels: adminDocs.map((d: any) => d.label),
             });
             return adminDocs;
           }
         }
-        // Admin upload exists but images not yet in vault (race condition)
-        // Don't fall back to old images — return empty to let caller handle
-        logger.warn('KycReviewController: admin-upload session exists but images not yet in vault', {
+        // Admin upload session exists but no vault images found yet.
+        // Skip old KycSession lookup to prevent showing stale DigiLocker/OCR images.
+        // Only fall back to legacy documents stored on user profile.
+        logger.info('⚠️  Admin upload has no vault images yet, skipping old KycSession, checking legacy docs', {
           adminSessionId,
           userId,
         });
-        return [];
-      }
+        // Skip KycSession lookup entirely when admin upload was initiated
+        // Jump directly to legacy documents fallback below
+      } else {
+        // 2. Only search KycSession if there's NO fresh admin upload
+        //    Prefer exact verification_id match (DigiLocker / OCR sessions), then fall
+        //    back to the latest OCR session for the user.
+        logger.debug('Searching for KycSession (no admin upload)', { verificationId, userId });
+        let session = verificationId && !verificationId.startsWith('admin_upload_')
+          ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
+              .sort(sessionSort)
+              .lean()
+          : null;
 
-      // 2. Only search KycSession if there's NO fresh admin upload
-      //    Prefer exact verification_id match (DigiLocker / OCR sessions), then fall
-      //    back to the latest OCR session for the user.
-      let session = verificationId && !verificationId.startsWith('admin_upload_')
-        ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
+        if (!session?.ocr?.frontImageKey && !session?.ocr?.backImageKey) {
+          session = await KycSession.findOne(
+            { userId, sessionType: 'aadhaar_ocr' },
+            sessionProjection,
+          )
             .sort(sessionSort)
-            .lean()
-        : null;
+            .lean();
+        }
 
-      if (!session?.ocr?.frontImageKey && !session?.ocr?.backImageKey) {
-        session = await KycSession.findOne(
-          { userId, sessionType: 'aadhaar_ocr' },
-          sessionProjection,
-        )
-          .sort(sessionSort)
-          .lean();
-      }
-
-      if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
-        const keysToSign = await getVaultKeysForSession(
-          userId,
-          verificationId,
-          session?.ocr,
-        );
-        if (keysToSign.length > 0) {
-          const docs = await minioService.getPresignedUrls(keysToSign);
-          if (docs.length > 0) return docs;
-          logger.warn('KycReviewController: KycSession had image keys but presigning returned none', {
+        if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
+          const keysToSign = await getVaultKeysForSession(
+            userId,
+            verificationId,
+            session?.ocr,
+          );
+          if (keysToSign.length > 0) {
+            const docs = await minioService.getPresignedUrls(keysToSign);
+            if (docs.length > 0) return docs;
+            logger.warn('KycReviewController: KycSession had image keys but presigning returned none', {
+              verificationId,
+              userId,
+              keys: keysToSign.map((item) => item.key),
+            });
+          }
+        } else {
+          logger.debug('KycReviewController: no KycSession OCR image keys found', {
             verificationId,
             userId,
-            keys: keysToSign.map((item) => item.key),
           });
         }
-      } else {
-        logger.debug('KycReviewController: no KycSession OCR image keys found', {
-          verificationId,
-          userId,
-        });
       }
     } catch (error: any) {
       logger.warn('KycReviewController: failed to fetch KycSession image keys', {
@@ -309,8 +323,11 @@ async function getAadhaarDocuments(
   }
 
   // --- Fallback: legacy documents / imageUrls stored on user profile ---
+  // Used when: admin upload has no vault images yet, OR no KycSession images found
+  logger.info('📦 Checking legacy documents/imageUrls fallback', { userId, adminSessionId, verificationId });
   const rawDocuments = user?.aadhaarKyc?.documents;
   if (Array.isArray(rawDocuments) && rawDocuments.length > 0) {
+    logger.info('✅ RETURNING legacy documents', { userId, count: rawDocuments.length, labels: rawDocuments.map((d: any) => d.label) });
     return rawDocuments
       .map((item: any, index: number) => ({
         label: String(item?.label || `Aadhaar image ${index + 1}`),
@@ -320,12 +337,15 @@ async function getAadhaarDocuments(
   }
 
   const imageUrls = Array.isArray(user?.aadhaarKyc?.imageUrls) ? user.aadhaarKyc.imageUrls : [];
-  return imageUrls
+  logger.info('📦 Checking legacy imageUrls fallback', { userId, urlCount: imageUrls.length });
+  const result = imageUrls
     .map((url: unknown, index: number) => ({
       label: `Aadhaar image ${index + 1}`,
       url: String(url || ''),
     }))
     .filter((item: { label: string; url: string }) => item.url);
+  logger.info('❌ NO IMAGES FOUND, returning empty/imageUrls result', { userId, count: result.length });
+  return result;
 }
 
 async function buildReviewRows(req: Request) {
@@ -817,29 +837,46 @@ export class KycReviewController {
 
       // ── After back-side upload: notify + upsert KycReview ───────────────────
       if (side === 'back') {
-        // Upsert KycReview with this sessionId (new batch = new record keyed by sessionId)
+        // Upsert KycReview keyed by userId only (not sessionId)
+        // This ensures re-uploads for same user UPDATE the existing review instead of creating a new one
+        // IMPORTANT: Preserve claimedBy and reviewStatus on re-upload
         try {
-          await KycReview.findOneAndUpdate(
-            { userId, sessionId },
-            {
-              $set: {
-                userId,
-                sessionId,
-                verificationId: existingVerificationId || '',
-                reviewStatus: 'pending',
-                followUpStatus: 'none',
-                followUpDate: null,
-                rejectionReason: '',
-                uploadedBy: {
-                  userId: req.admin!.userId,
-                  email: req.admin!.email,
-                  name: req.admin!.name,
-                },
-                uploadedAt: new Date(),
-              },
+          // First check if review already exists
+          const existingReview = await KycReview.findOne({ userId }).lean();
+          
+          // Always update these fields
+          const baseUpdate: any = {
+            userId,
+            sessionId,
+            uploadedBy: {
+              userId: req.admin!.userId,
+              email: req.admin!.email,
+              name: req.admin!.name,
             },
+            uploadedAt: new Date(),
+          };
+
+          // On first upload (new review), also set initial status
+          if (!existingReview) {
+            baseUpdate.verificationId = existingVerificationId || '';
+            baseUpdate.reviewStatus = 'pending';
+            baseUpdate.followUpStatus = 'none';
+            baseUpdate.followUpDate = null;
+            baseUpdate.rejectionReason = '';
+          }
+          // On re-upload: preserve existing claimedBy, reviewStatus, etc - only update images
+
+          await KycReview.findOneAndUpdate(
+            { userId },
+            { $set: baseUpdate },
             { upsert: true, new: true, setDefaultsOnInsert: true },
           );
+          
+          logger.info('KycReview updated after admin upload', {
+            userId,
+            isNewReview: !existingReview,
+            sessionId,
+          });
         } catch (reviewErr: any) {
           logger.warn('Failed to upsert KycReview after admin upload', {
             userId,
@@ -1583,6 +1620,8 @@ export class KycReviewController {
       const sessionId = String(req.query.sessionId || '').trim();
       const verificationId = String(req.query.verificationId || '').trim();
 
+      logger.info('🌐 getDocuments API called', { userId, sessionId, verificationId });
+
       let user: any = null;
       try {
         const result = await userServiceClient.getUser(userId, req.admin!.userId);
@@ -1594,14 +1633,18 @@ export class KycReviewController {
 
       const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
       const review = await KycReview.findOne(query).sort({ updatedAt: -1 }).lean();
+      logger.info('📝 KycReview lookup result', { userId: profileUid, sessionId, foundReview: !!review, reviewSessionId: review?.sessionId });
 
       const adminSessionId =
         (review?.sessionId && String(review.sessionId).startsWith('admin_upload_')
           ? review.sessionId
           : undefined) ||
         (sessionId.startsWith('admin_upload_') ? sessionId : undefined);
+      
+      logger.info('🔑 Resolved adminSessionId for getDocuments', { userId: profileUid, sessionId, reviewSessionId: review?.sessionId, adminSessionId });
 
       const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
+      logger.info('📤 getDocuments returning', { userId, docCount: documents.length, labels: documents.map((d: any) => d.label) });
       res.json({ success: true, data: documents });
     } catch (error: any) {
       logger.error('Get KYC documents error:', error);

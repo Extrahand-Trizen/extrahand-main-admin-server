@@ -110,8 +110,8 @@ async function getAadhaarDocuments(
       const sessionSort = { updatedAt: -1, createdAt: -1 } as const;
 
       // 1. If this is an admin-upload session, search that MinIO prefix ONLY.
-      //    When admin upload exists, we must NOT fall back to old KycSession images
-      //    to avoid showing stale data after re-uploads.
+      //    When admin upload has images, return them immediately.
+      //    If no images in vault yet, skip old KycSession lookup and use legacy docs.
       if (adminSessionId && adminSessionId.startsWith('admin_upload_')) {
         const adminKeys = await getVaultKeysForSession(userId, adminSessionId, undefined);
         if (adminKeys.length > 0) {
@@ -125,44 +125,45 @@ async function getAadhaarDocuments(
             return adminDocs;
           }
         }
-        // Admin upload exists but images not yet in vault (race condition)
-        logger.warn('AadhaarFollowUpController: admin-upload session exists but images not yet in vault', {
+        // Admin upload initiated but no vault images yet
+        // Skip KycSession lookup to prevent old images from shadowing fresh uploads
+        logger.debug('AadhaarFollowUpController: admin-upload session has no vault images, checking legacy docs', {
           adminSessionId,
           userId,
         });
-        return [];
-      }
+        // Jump directly to legacy documents fallback below
+      } else {
+        // 2. Only search KycSession if there's NO fresh admin upload
+        let session = verificationId && !verificationId.startsWith('admin_upload_')
+          ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
+              .sort(sessionSort)
+              .lean()
+          : null;
 
-      // 2. Only search KycSession if there's NO fresh admin upload
-      let session = verificationId && !verificationId.startsWith('admin_upload_')
-        ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
+        if (!session?.ocr?.frontImageKey && !session?.ocr?.backImageKey) {
+          session = await KycSession.findOne(
+            { userId, sessionType: 'aadhaar_ocr' },
+            sessionProjection,
+          )
             .sort(sessionSort)
-            .lean()
-        : null;
+            .lean();
+        }
 
-      if (!session?.ocr?.frontImageKey && !session?.ocr?.backImageKey) {
-        session = await KycSession.findOne(
-          { userId, sessionType: 'aadhaar_ocr' },
-          sessionProjection,
-        )
-          .sort(sessionSort)
-          .lean();
-      }
-
-      if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
-        const keysToSign = await getVaultKeysForSession(
-          userId,
-          verificationId,
-          session?.ocr,
-        );
-        if (keysToSign.length > 0) {
-          const docs = await minioService.getPresignedUrls(keysToSign);
-          if (docs.length > 0) return docs;
-          logger.warn('AadhaarFollowUpController: KycSession had image keys but presigning returned none', {
-            verificationId,
+        if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
+          const keysToSign = await getVaultKeysForSession(
             userId,
-            keys: keysToSign.map((item) => item.key),
-          });
+            verificationId,
+            session?.ocr,
+          );
+          if (keysToSign.length > 0) {
+            const docs = await minioService.getPresignedUrls(keysToSign);
+            if (docs.length > 0) return docs;
+            logger.warn('AadhaarFollowUpController: KycSession had image keys but presigning returned none', {
+              verificationId,
+              userId,
+              keys: keysToSign.map((item) => item.key),
+            });
+          }
         }
       }
     } catch (error: any) {
