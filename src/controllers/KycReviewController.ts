@@ -454,12 +454,11 @@ async function buildReviewRows(req: Request) {
     // sessionId is used for KycReview record keying (can be verificationId or a legacy id)
     const sessionId = verificationId || String(user?.aadhaarKyc?.id || '');
     
-    // Check both profileUid and unresolved userId keys in review maps
-    const exactReview = reviewMap.get(`${profileUid}:${sessionId}`) || reviewMap.get(`${userId}:${sessionId}`) || null;
-    const previousReview = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
-    const review = exactReview || previousReview || null;
+    // ALWAYS USE LATEST REVIEW - it has the most recent sessionId (admin_upload_ or verified)
+    // Bypassing exact match prevents stale verificationId from blocking latest uploads
+    const review = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
     const hasNewUploadAfterReview =
-      !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
+      !Boolean(sessionId === review?.sessionId) && Boolean(sessionId) && Boolean(review?.sessionId);
 
     const claimedBy = review?.claimedBy || null;
     const claimedAt = review?.claimedAt || null;
@@ -467,7 +466,7 @@ async function buildReviewRows(req: Request) {
     // Detect manual admin-upload sessions (sessionId starts with "admin_upload_").
     // The review document holds the canonical admin sessionId even when verificationId
     // points to an older DigiLocker session, so we must use it for MinIO lookup.
-    const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
+    const isManualUpload = Boolean(review?.sessionId && String(review.sessionId).startsWith('admin_upload_'));
     const uploadedBy = review?.uploadedBy || null;
 
     // Resolve the admin upload session ID from the review record if available.
@@ -617,16 +616,16 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
     );
     const sessionId = verificationId || String(user?.aadhaarKyc?.id || '');
 
-    const exactReview = reviewMap.get(`${profileUid}:${sessionId}`) || reviewMap.get(`${userId}:${sessionId}`) || null;
-    const previousReview = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
-    const review = exactReview || previousReview || null;
+    // ALWAYS USE LATEST REVIEW - it has the most recent sessionId (admin_upload_ or verified)
+    // Bypassing exact match prevents stale verificationId from blocking latest uploads
+    const review = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
     const hasNewUploadAfterReview =
-      !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
+      !Boolean(sessionId === review?.sessionId) && Boolean(sessionId) && Boolean(review?.sessionId);
 
     const claimedBy = review?.claimedBy || null;
     const claimedAt = review?.claimedAt || null;
 
-    const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
+    const isManualUpload = Boolean(review?.sessionId && String(review.sessionId).startsWith('admin_upload_'));
     const uploadedBy = review?.uploadedBy || null;
 
     const adminSessionId =
@@ -1649,20 +1648,62 @@ export class KycReviewController {
       }
       const profileUid = resolveProfileUid(user, userId);
 
-      const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
-      const review = await KycReview.findOne(query).sort({ updatedAt: -1 }).lean();
-      logger.info('📝 KycReview lookup result', { userId: profileUid, sessionId, foundReview: !!review, reviewSessionId: review?.sessionId });
+      // ALWAYS fetch the latest KycReview for this user, regardless of the sessionId
+      // passed from the frontend. The frontend may hold a stale DigiLocker sessionId
+      // while the latest KycReview already has an admin_upload_ sessionId (from a
+      // re-upload). Using the stale sessionId would miss the fresh images.
+      const latestReview = await KycReview.findOne({ userId: profileUid })
+        .sort({ updatedAt: -1 })
+        .lean();
 
+      // Also try the exact-match query in case the userId doesn't match the profileUid
+      const exactReview =
+        profileUid !== userId
+          ? await KycReview.findOne({ userId }).sort({ updatedAt: -1 }).lean()
+          : null;
+
+      // Use whichever review is more recent
+      let review = latestReview;
+      if (exactReview && (!latestReview || new Date(exactReview.updatedAt ?? 0) > new Date(latestReview.updatedAt ?? 0))) {
+        review = exactReview;
+      }
+
+      logger.info('📝 KycReview lookup result (latest)', {
+        userId: profileUid,
+        sessionId,
+        foundReview: !!review,
+        reviewSessionId: review?.sessionId,
+        reviewUpdatedAt: review?.updatedAt,
+      });
+
+      // Determine the admin upload session ID from the latest review.
+      // Priority: latest review's admin_upload_ sessionId > sessionId param if it's admin_upload_
       const adminSessionId =
         (review?.sessionId && String(review.sessionId).startsWith('admin_upload_')
           ? review.sessionId
           : undefined) ||
         (sessionId.startsWith('admin_upload_') ? sessionId : undefined);
-      
-      logger.info('🔑 Resolved adminSessionId for getDocuments', { userId: profileUid, sessionId, reviewSessionId: review?.sessionId, adminSessionId });
 
-      const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
-      logger.info('📤 getDocuments returning', { userId, docCount: documents.length, labels: documents.map((d: any) => d.label) });
+      logger.info('🔑 Resolved adminSessionId for getDocuments', {
+        userId: profileUid,
+        sessionIdParam: sessionId,
+        reviewSessionId: review?.sessionId,
+        adminSessionId,
+      });
+
+      // Use the review's verificationId if available; otherwise fall back to param.
+      // For admin uploads the verificationId from the review is the canonical one.
+      const resolvedVerificationId =
+        (review?.verificationId && !String(review.verificationId).startsWith('admin_upload_')
+          ? review.verificationId
+          : verificationId) || verificationId;
+
+      const documents = await getAadhaarDocuments(user, resolvedVerificationId, userId, adminSessionId);
+      logger.info('📤 getDocuments returning', {
+        userId,
+        docCount: documents.length,
+        labels: documents.map((d: any) => d.label),
+      });
       res.json({ success: true, data: documents });
     } catch (error: any) {
       logger.error('Get KYC documents error:', error);
