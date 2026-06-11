@@ -234,9 +234,10 @@ async function getAadhaarDocuments(
       };
       const sessionSort = { updatedAt: -1, createdAt: -1 } as const;
 
-      // 1. If this is an admin-upload session, search that MinIO prefix first.
+      // 1. If this is an admin-upload session, search that MinIO prefix ONLY.
       //    Admin uploads store objects under aadhaar-ocr/{userId}/{adminSessionId}/
-      //    and never create a KycSession record, so skip the DB lookup entirely.
+      //    When admin upload exists, we must NOT fall back to old KycSession images
+      //    to avoid showing stale data after re-uploads.
       if (adminSessionId && adminSessionId.startsWith('admin_upload_')) {
         const adminKeys = await getVaultKeysForSession(userId, adminSessionId, undefined);
         if (adminKeys.length > 0) {
@@ -250,13 +251,17 @@ async function getAadhaarDocuments(
             return adminDocs;
           }
         }
-        logger.warn('KycReviewController: admin-upload session had no vault images', {
+        // Admin upload exists but images not yet in vault (race condition)
+        // Don't fall back to old images — return empty to let caller handle
+        logger.warn('KycReviewController: admin-upload session exists but images not yet in vault', {
           adminSessionId,
           userId,
         });
+        return [];
       }
 
-      // 2. Prefer exact verification_id match (DigiLocker / OCR sessions), then fall
+      // 2. Only search KycSession if there's NO fresh admin upload
+      //    Prefer exact verification_id match (DigiLocker / OCR sessions), then fall
       //    back to the latest OCR session for the user.
       let session = verificationId && !verificationId.startsWith('admin_upload_')
         ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
@@ -449,7 +454,7 @@ async function buildReviewRows(req: Request) {
 
     // Resolve presigned Aadhaar image URLs from the KYC vault.
     // For admin uploads, adminSessionId takes priority over verificationId.
-    const documents: any[] = [];
+    const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
 
     return {
       notificationId: notification ? String(notification._id) : '',
@@ -594,7 +599,7 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
         ? notification.metadata.sessionId
         : undefined);
 
-    const documents: any[] = [];
+    const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
 
     return {
       notificationId: notification ? String(notification._id) : '',
@@ -1377,7 +1382,112 @@ export class KycReviewController {
       
       const claimedUserIds = claimedReviews.map((r) => String(r.userId || '').trim()).filter(Boolean);
 
-      let rows = await buildReviewRowsForUserIds(req, claimedUserIds);
+      // For myClaims, build rows DIRECTLY from claimed KycReview records
+      // (don't require notifications to exist, unlike the main list)
+      let rows: any[] = [];
+      
+      if (claimedReviews.length > 0) {
+        // Fetch user data for enrichment (but don't fail if users don't exist)
+        const userMap = new Map<string, any>();
+        await Promise.all(
+          claimedUserIds.map(async (userId) => {
+            try {
+              const result = await userServiceClient.getUser(userId, req.admin!.userId);
+              const user = result?.data || result;
+              userMap.set(userId, user);
+            } catch (error: any) {
+              logger.debug('KYC review user enrichment skipped (user not found)', {
+                userId,
+                error: error.message,
+              });
+              // Continue without user data
+              userMap.set(userId, null);
+            }
+          })
+        );
+
+        // Also fetch notifications for enrichment (as secondary data source)
+        const notificationData = new Map<string, any>();
+        try {
+          const notifications = await AdminNotification.find({
+            dashboardType: DashboardType.MAIN_ADMIN,
+            type: { $in: AADHAAR_NOTIFICATION_TYPES },
+            'metadata.userId': { $in: claimedUserIds },
+          })
+            .sort({ createdAt: -1 })
+            .lean();
+
+          for (const notification of notifications) {
+            const userId = String(notification.metadata?.userId || '').trim();
+            if (userId && !notificationData.has(userId)) {
+              notificationData.set(userId, notification);
+            }
+          }
+        } catch (error: any) {
+          logger.debug('Could not fetch enrichment notifications', { error: error.message });
+        }
+
+        // Build rows directly from KycReview records
+        rows = claimedReviews.map((review) => {
+          const userId = String(review.userId || '').trim();
+          const user = userMap.get(userId);
+          const notification = notificationData.get(userId);
+          const isAadhaarVerified = isProfileAadhaarVerified(user);
+          const aadhaarKyc = user?.aadhaarKyc || {};
+
+          // Priority: User from service > Notification metadata > Fallback to admin names
+          const userName = user?.name 
+            || notification?.metadata?.userName 
+            || review.uploadedBy?.name 
+            || review.claimedBy?.name 
+            || review.reviewedBy?.name 
+            || 'Unknown';
+          
+          const userEmail = user?.email || '';
+          const userPhone = user?.phone || user?.phoneNumber || '';
+          
+          // Priority: User aadhaarKyc > Notification metadata > Unknown
+          const aadhaarStatus = aadhaarKyc?.internalStatus 
+            || aadhaarKyc?.status 
+            || notification?.metadata?.aadhaar 
+            || 'unknown';
+
+          return {
+            notificationId: String(review._id || ''),
+            userId: userId,
+            userName: userName,
+            userEmail: userEmail,
+            userPhone: userPhone,
+            aadhaar: String(aadhaarStatus).toLowerCase(),
+            failureReason: aadhaarKyc?.failureReason || review.rejectionReason || '',
+            failedOn: aadhaarKyc?.failedOn ? new Date(aadhaarKyc.failedOn).toISOString() : '',
+            aadhaarUpdatedAt: aadhaarKyc?.updatedAt ? new Date(aadhaarKyc.updatedAt).toISOString() : '',
+            followUpStatus: review.followUpStatus || 'none',
+            followUpDate: review.followUpDate ? new Date(review.followUpDate).toISOString() : null,
+            registeredAt: user?.registeredAt ? new Date(user.registeredAt).toISOString() : null,
+            assignedTo: [], // Not applicable for my-claims
+            claimedBy: review.claimedBy || null,
+            claimedAt: review.claimedAt ? new Date(review.claimedAt).toISOString() : null,
+            reviewStatus: review.reviewStatus || 'pending',
+            reviewedBy: review.reviewedBy || null,
+            reviewedAt: review.reviewedAt ? new Date(review.reviewedAt).toISOString() : null,
+            sessionId: review.sessionId || '',
+            verificationId: review.verificationId || aadhaarKyc?.verificationId || '',
+            isAadhaarVerified: isAadhaarVerified,
+            isManualUpload: Boolean(review.sessionId && String(review.sessionId).startsWith('admin_upload_')),
+            uploadedBy: review.uploadedBy || null,
+            uploadedAt: review.uploadedAt ? new Date(review.uploadedAt).toISOString() : null,
+            documents: [],
+            profileUrl: `/users/${encodeURIComponent(String(review.userId || ''))}?tab=verification`,
+          };
+        });
+        
+        logger.debug('Built rows from claimed KycReview records', {
+          adminUserId,
+          claimedReviewsCount: claimedReviews.length,
+          rowsBuilt: rows.length,
+        });
+      }
 
       rows = rows.filter((row) => row.claimedBy?.userId === req.admin!.userId);
 
