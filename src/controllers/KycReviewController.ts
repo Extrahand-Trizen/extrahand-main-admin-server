@@ -492,6 +492,146 @@ async function buildReviewRows(req: Request) {
   return rows;
 }
 
+/**
+ * Like buildReviewRows but scoped to a known list of userIds.
+ * Used by myClaims so that claimed reviews always appear regardless of whether
+ * the user has a recent notification or a pending KycSession.
+ */
+async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
+  if (userIds.length === 0) return [];
+
+  // Deduplicate
+  const uniqueUserIds = Array.from(new Set(userIds));
+
+  // Fetch all notifications for these users (no limit, scoped to these users)
+  const notifications = await AdminNotification.find({
+    dashboardType: DashboardType.MAIN_ADMIN,
+    type: { $in: AADHAAR_NOTIFICATION_TYPES },
+    'metadata.userId': { $in: uniqueUserIds },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const latestByUserId = new Map<string, any>();
+  for (const notification of notifications) {
+    const userId = String(notification.metadata?.userId || '').trim();
+    if (!userId || latestByUserId.has(userId)) continue;
+    latestByUserId.set(userId, notification);
+  }
+
+  // Resolve all user profiles
+  const resolvedUsers = await Promise.all(
+    uniqueUserIds.map(async (userId) => {
+      let user: any = null;
+      try {
+        const result = await userServiceClient.getUser(userId, req.admin!.userId);
+        user = result?.data || result;
+      } catch (error: any) {
+        logger.warn('KYC review user enrichment failed (myClaims)', {
+          userId,
+          error: error.message,
+        });
+      }
+      const profileUid = resolveProfileUid(user, userId);
+      return { userId, user, profileUid };
+    })
+  );
+
+  const resolvedUserMap = new Map<string, { user: any; profileUid: string }>();
+  const allLookupIds = new Set<string>();
+  for (const item of resolvedUsers) {
+    resolvedUserMap.set(item.userId, { user: item.user, profileUid: item.profileUid });
+    allLookupIds.add(item.userId);
+    allLookupIds.add(item.profileUid);
+  }
+
+  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
+  const reviewMap = new Map<string, any>();
+  for (const review of reviewDocs) {
+    reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
+  }
+  const fallbackReviewMap = new Map<string, any>();
+  for (const review of reviewDocs) {
+    fallbackReviewMap.set(review.userId, review);
+  }
+
+  const rowPromises = uniqueUserIds.map(async (userId) => {
+    const notification = latestByUserId.get(userId);
+    const resolved = resolvedUserMap.get(userId);
+    const user = resolved?.user || null;
+    const profileUid = resolved?.profileUid || userId;
+
+    const verificationId = String(
+      user?.aadhaarKyc?.verificationId ||
+      notification?.metadata?.verificationId ||
+      notification?.metadata?.sessionId ||
+      '',
+    );
+    const sessionId = verificationId || String(user?.aadhaarKyc?.id || '');
+
+    const exactReview = reviewMap.get(`${profileUid}:${sessionId}`) || reviewMap.get(`${userId}:${sessionId}`) || null;
+    const previousReview = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
+    const review = exactReview || previousReview || null;
+    const hasNewUploadAfterReview =
+      !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
+
+    const claimedBy = review?.claimedBy || null;
+    const claimedAt = review?.claimedAt || null;
+
+    const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
+    const uploadedBy = review?.uploadedBy || null;
+
+    const adminSessionId =
+      (review?.sessionId && String(review.sessionId).startsWith('admin_upload_')
+        ? review.sessionId
+        : undefined) ||
+      (notification?.metadata?.sessionId && String(notification.metadata.sessionId).startsWith('admin_upload_')
+        ? notification.metadata.sessionId
+        : undefined);
+
+    const documents: any[] = [];
+
+    return {
+      notificationId: notification ? String(notification._id) : '',
+      userId,
+      userName: user?.name || notification?.metadata?.userName || 'Unknown user',
+      userEmail: user?.email || notification?.metadata?.userEmail || '',
+      userPhone: user?.phone || notification?.metadata?.userPhone || '',
+      registeredAt: String(user?.createdAt || user?.created_at || notification?.createdAt || ''),
+      aadhaar: getAadhaarStatus(user, notification) || 'Under Review',
+      failureReason:
+        user?.aadhaarKyc?.failureReason ||
+        notification?.metadata?.failureReason ||
+        review?.rejectionReason ||
+        '',
+      failedOn:
+        user?.aadhaarKyc?.visibleFailureAt ||
+        user?.aadhaarKyc?.updatedAt ||
+        notification?.createdAt ||
+        null,
+      aadhaarUpdatedAt: user?.aadhaarKyc?.updatedAt || notification?.createdAt || null,
+      followUpStatus: hasNewUploadAfterReview ? 'followup_uploaded' : review?.followUpStatus || 'none',
+      followUpDate: review?.followUpDate || null,
+      claimedBy,
+      claimedAt,
+      reviewStatus: hasNewUploadAfterReview ? 'pending' : review?.reviewStatus || 'pending',
+      reviewedBy: review?.reviewedBy || null,
+      reviewedAt: review?.reviewedAt || null,
+      sessionId,
+      verificationId: user?.aadhaarKyc?.verificationId || notification?.metadata?.verificationId || '',
+      isAadhaarVerified: isProfileAadhaarVerified(user),
+      isManualUpload,
+      uploadedBy,
+      uploadedAt: review?.uploadedAt || null,
+      documents,
+      profileUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
+    };
+  });
+
+  const rows = await Promise.all(rowPromises);
+  return rows;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Admin-initiated Aadhaar document upload
 // ──────────────────────────────────────────────────────────────────────────────
@@ -801,14 +941,18 @@ export class KycReviewController {
         );
       }
 
-      // Sort
+      // Sort by the most recent Aadhaar-related event timestamp.
+      // For manual admin uploads: use uploadedAt (the upload event).
+      // For all others: use aadhaarUpdatedAt (the notification/event time — failure, review, etc.).
+      // This is consistent between environments and prevents accepted/verified users from
+      // sorting above pending ones due to a recent aadhaarKyc.updatedAt verification timestamp.
       rows.sort((a, b) => {
         const aTime = a.isManualUpload
           ? (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
-          : (a.failedOn ? new Date(a.failedOn).getTime() : 0);
+          : (a.aadhaarUpdatedAt ? new Date(a.aadhaarUpdatedAt).getTime() : 0);
         const bTime = b.isManualUpload
           ? (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
-          : (b.failedOn ? new Date(b.failedOn).getTime() : 0);
+          : (b.aadhaarUpdatedAt ? new Date(b.aadhaarUpdatedAt).getTime() : 0);
 
         const aDate = aTime || (a.registeredAt ? new Date(a.registeredAt).getTime() : 0);
         const bDate = bTime || (b.registeredAt ? new Date(b.registeredAt).getTime() : 0);
@@ -1187,7 +1331,15 @@ export class KycReviewController {
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
-      let rows = await buildReviewRows(req);
+      // Fetch ALL reviews claimed by this admin directly — this is the source-of-truth
+      // for My Claims and ensures claimed leads are never dropped, even if they don't
+      // appear in the notification window or have non-pending KycSession statuses.
+      const claimedReviews = await KycReview.find({
+        'claimedBy.userId': req.admin!.userId,
+      }).lean();
+      const claimedUserIds = claimedReviews.map((r) => String(r.userId || '').trim()).filter(Boolean);
+
+      let rows = await buildReviewRowsForUserIds(req, claimedUserIds);
 
       rows = rows.filter((row) => row.claimedBy?.userId === req.admin!.userId);
 
@@ -1236,10 +1388,10 @@ export class KycReviewController {
       rows.sort((a, b) => {
         const aTime = a.isManualUpload
           ? (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
-          : (a.failedOn ? new Date(a.failedOn).getTime() : 0);
+          : (a.aadhaarUpdatedAt ? new Date(a.aadhaarUpdatedAt).getTime() : 0);
         const bTime = b.isManualUpload
           ? (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
-          : (b.failedOn ? new Date(b.failedOn).getTime() : 0);
+          : (b.aadhaarUpdatedAt ? new Date(b.aadhaarUpdatedAt).getTime() : 0);
 
         const aDate = aTime || (a.registeredAt ? new Date(a.registeredAt).getTime() : 0);
         const bDate = bTime || (b.registeredAt ? new Date(b.registeredAt).getTime() : 0);
