@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "dockerfilePath": "./Dockerfile",
   "buildArguments": {
-    "CACHE_BUST": "latest"
+    "CACHE_BUST": "build-2026-06-11-correct-appname"
   },
   "expose": {
     "api": {
@@ -19,7 +19,7 @@
     "retries": 3,
     "startPeriod": 30
   },
-  "appName": "extrahand-main-admin-service",
+  "appName": "extrahand-main-admin-server",
   "hasPersistentData": false,
   "description": "ExtraHand Main Admin Service - auth, user/task/support/admin operations",
   "instanceCount": 1,

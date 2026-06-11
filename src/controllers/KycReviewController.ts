@@ -1337,12 +1337,44 @@ export class KycReviewController {
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
+      // DEBUG: Log admin info
+      const adminUserId = req.admin!.userId;
+      logger.debug('My Claims request', {
+        adminUserId,
+        adminEmail: req.admin!.email,
+        adminName: req.admin!.name,
+        filters: { reviewStatus, followUpStatus, includeVerified, sortOrder, page, limit },
+      });
+
       // Fetch ALL reviews claimed by this admin directly — this is the source-of-truth
       // for My Claims and ensures claimed leads are never dropped, even if they don't
       // appear in the notification window or have non-pending KycSession statuses.
-      const claimedReviews = await KycReview.find({
-        'claimedBy.userId': req.admin!.userId,
+      let claimedReviews = await KycReview.find({
+        'claimedBy.userId': adminUserId,
       }).lean();
+      
+      logger.debug('My Claims database query (by userId)', {
+        adminUserId,
+        adminEmail: req.admin!.email,
+        claimedReviewsCount: claimedReviews.length,
+        firstReviewUserId: claimedReviews[0]?.userId,
+        firstReviewClaimedBy: claimedReviews[0]?.claimedBy,
+      });
+
+      // FALLBACK: If no reviews found by userId, try by email (handles userId mismatch scenarios)
+      if (claimedReviews.length === 0) {
+        logger.warn('No claimed reviews found by userId, trying by email', { adminUserId, adminEmail: req.admin!.email });
+        claimedReviews = await KycReview.find({
+          'claimedBy.email': req.admin!.email,
+        }).lean();
+        
+        logger.debug('My Claims database query (by email fallback)', {
+          adminUserId,
+          adminEmail: req.admin!.email,
+          claimedReviewsCount: claimedReviews.length,
+        });
+      }
+      
       const claimedUserIds = claimedReviews.map((r) => String(r.userId || '').trim()).filter(Boolean);
 
       let rows = await buildReviewRowsForUserIds(req, claimedUserIds);
@@ -1410,6 +1442,13 @@ export class KycReviewController {
       const startIndex = (page - 1) * limit;
       const paginatedRows = rows.slice(startIndex, startIndex + limit);
       const pages = Math.ceil(total / limit);
+
+      logger.debug('My Claims result', {
+        adminUserId,
+        totalAfterFiltering: total,
+        returnedCount: paginatedRows.length,
+        pagination: { page, limit, total, pages },
+      });
 
       res.json({
         success: true,
