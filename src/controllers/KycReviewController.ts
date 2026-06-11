@@ -326,8 +326,6 @@ async function getAadhaarDocuments(
 async function buildReviewRows(req: Request) {
   // Notification-driven approach: only show users who have triggered an Aadhaar
   // KYC review event (aadhaar_verification_failed or aadhaar_verification_under_review).
-  // This matches the production behavior (16 real reviews) vs the all-unverified-helpers
-  // approach that showed 20 including non-KYC-event users.
   const notifications = await AdminNotification.find({
     dashboardType: DashboardType.MAIN_ADMIN,
     type: { $in: AADHAAR_NOTIFICATION_TYPES },
@@ -343,7 +341,31 @@ async function buildReviewRows(req: Request) {
     latestByUserId.set(userId, notification);
   }
 
-  const userIds = Array.from(latestByUserId.keys());
+  // Also query KycReview and KycSession to collect other userIds (expired and reuploadeds)
+  const [pendingReviews, kycSessions] = await Promise.all([
+    KycReview.find({
+      $or: [
+        { reviewStatus: 'pending' },
+        { followUpStatus: 'followup_uploaded' },
+      ],
+    }).lean(),
+    KycSession.find({
+      sessionType: { $regex: '^aadhaar', $options: 'i' },
+      visibleStatus: { $in: ['expired', 'under_review', 'failed', 'rejected', 'pending'] },
+    }).lean(),
+  ]);
+
+  const userIdsSet = new Set<string>(latestByUserId.keys());
+  for (const review of pendingReviews) {
+    const userId = String(review.userId || '').trim();
+    if (userId) userIdsSet.add(userId);
+  }
+  for (const session of kycSessions) {
+    const userId = String(session.userId || '').trim();
+    if (userId) userIdsSet.add(userId);
+  }
+
+  const userIds = Array.from(userIdsSet);
 
   // Resolve all user profiles and UIDs to avoid mismatches in parallel
   const resolvedUsers = await Promise.all(
@@ -391,8 +413,8 @@ async function buildReviewRows(req: Request) {
     // aadhaarKyc.id             = MongoDB _id — do NOT use for KycSession lookup.
     const verificationId = String(
       user?.aadhaarKyc?.verificationId ||
-      notification.metadata?.verificationId ||
-      notification.metadata?.sessionId ||
+      notification?.metadata?.verificationId ||
+      notification?.metadata?.sessionId ||
       '',
     );
     // sessionId is used for KycReview record keying (can be verificationId or a legacy id)
@@ -430,16 +452,16 @@ async function buildReviewRows(req: Request) {
     const documents: any[] = [];
 
     return {
-      notificationId: String(notification._id),
+      notificationId: notification ? String(notification._id) : '',
       userId,
-      userName: user?.name || notification.metadata?.userName || 'Unknown user',
-      userEmail: user?.email || notification.metadata?.userEmail || '',
-      userPhone: user?.phone || notification.metadata?.userPhone || '',
-      registeredAt: String(user?.createdAt || user?.created_at || notification.createdAt || ''),
+      userName: user?.name || notification?.metadata?.userName || 'Unknown user',
+      userEmail: user?.email || notification?.metadata?.userEmail || '',
+      userPhone: user?.phone || notification?.metadata?.userPhone || '',
+      registeredAt: String(user?.createdAt || user?.created_at || notification?.createdAt || ''),
       aadhaar: getAadhaarStatus(user, notification) || 'Under Review',
       failureReason:
         user?.aadhaarKyc?.failureReason ||
-        notification.metadata?.failureReason ||
+        notification?.metadata?.failureReason ||
         review?.rejectionReason ||
         '',
       failedOn:
