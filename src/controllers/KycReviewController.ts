@@ -128,9 +128,10 @@ function getAadhaarStatus(user: any, notification: any): string {
 }
 
 function buildVaultSessionPrefix(userId: string, verificationId: string): string {
-  const safeUser = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
-  const safeSession = String(verificationId).replace(/[^a-zA-Z0-9_-]/g, '');
-  return `aadhaar-ocr/${safeUser}/${safeSession}/`;
+  // Prevent path traversal while keeping characters like '+' intact
+  const cleanUser = String(userId).replace(/\.\./g, '');
+  const cleanSession = String(verificationId).replace(/\.\./g, '');
+  return `aadhaar-ocr/${cleanUser}/${cleanSession}/`;
 }
 
 function labelForVaultKey(key: string): string {
@@ -230,87 +231,108 @@ async function getAadhaarDocuments(
   user: any,
   verificationId: string,
   userId: string,
-  /** Admin-upload session ID (admin_upload_...) — searched as a separate MinIO prefix */
   adminSessionId?: string,
 ): Promise<Array<{ label: string; url: string }>> {
   if (minioService.isReady) {
     try {
+      // 1. Scan MinIO directly under the raw userId prefix to find the latest admin upload session
+      const prefix = `aadhaar-ocr/${userId}/`;
+      logger.debug('Scanning MinIO directly for user keys', { prefix });
+      const objects = await minioService.listObjectKeys(prefix);
+      logger.debug('Total MinIO keys found for user', { count: objects.length });
+
+      // Filter keys that belong to admin uploads
+      const adminUploadObjects = objects.filter(obj => obj.key.includes('/admin_upload_'));
+      
+      if (adminUploadObjects.length > 0) {
+        const sessions = adminUploadObjects.map(obj => {
+          const segments = obj.key.split('/');
+          return {
+            key: obj.key,
+            sessionId: segments[2],
+            lastModified: obj.lastModified
+          };
+        }).filter(item => item.sessionId && item.sessionId.startsWith('admin_upload_'));
+
+        if (sessions.length > 0) {
+          // Sort sessions by timestamp inside sessionId (admin_upload_{userId}_{timestamp})
+          const parseSessionTimestamp = (sessId: string) => {
+            const parts = sessId.split('_');
+            const tsStr = parts[parts.length - 1];
+            const ts = parseInt(tsStr, 10);
+            return isNaN(ts) ? 0 : ts;
+          };
+
+          sessions.sort((a, b) => {
+            const aTs = parseSessionTimestamp(a.sessionId);
+            const bTs = parseSessionTimestamp(b.sessionId);
+            if (aTs !== bTs) return bTs - aTs;
+            return (b.lastModified?.getTime() || 0) - (a.lastModified?.getTime() || 0);
+          });
+
+          // Pick the latest sessionId
+          const latestAdminSessionId = sessions[0].sessionId;
+          logger.info('Found latest admin upload session ID from MinIO scan', { latestAdminSessionId, userId });
+
+          // Get all objects belonging to this latest session
+          const latestSessionObjects = sessions.filter(item => item.sessionId === latestAdminSessionId);
+
+          const keysToSign = latestSessionObjects.map(item => ({
+            key: item.key,
+            label: labelForVaultKey(item.key)
+          }));
+
+          // Sort so front photo comes first
+          keysToSign.sort((a, b) => {
+            const rank = (label: string) =>
+              label === 'Aadhaar front' ? 0 : label === 'Aadhaar back' ? 1 : 2;
+            return rank(a.label) - rank(b.label);
+          });
+
+          const docs = await minioService.getPresignedUrls(keysToSign);
+          if (docs.length > 0) {
+            logger.info('✅ Returning latest admin-upload images from direct vault scan', {
+              latestAdminSessionId,
+              docsCount: docs.length,
+              userId
+            });
+            return docs;
+          }
+        }
+      }
+
+      // 2. Fallback: If no admin upload session exists in S3, proceed with standard session (DigiLocker/OCR)
       const sessionProjection = {
         'ocr.frontImageKey': 1,
         'ocr.backImageKey': 1,
       };
       const sessionSort = { updatedAt: -1, createdAt: -1 } as const;
 
-      // 1. If this is an admin-upload session, search that MinIO prefix ONLY.
-      //    Admin uploads store objects under aadhaar-ocr/{userId}/{adminSessionId}/
-      //    When admin upload exists AND has images, return them immediately.
-      //    This prevents old KycSession images from shadowing fresh uploads.
-      if (adminSessionId && adminSessionId.startsWith('admin_upload_')) {
-        logger.info('🔍 Admin upload session detected', { adminSessionId, userId });
-        const adminKeys = await getVaultKeysForSession(userId, adminSessionId, undefined);
-        logger.info('📋 Admin vault keys lookup result', { adminSessionId, userId, keyCount: adminKeys.length, keys: adminKeys.map((k: any) => k.key) });
-        if (adminKeys.length > 0) {
-          const adminDocs = await minioService.getPresignedUrls(adminKeys);
-          logger.info('🔗 Presigned URLs generated from admin keys', { adminSessionId, userId, urlCount: adminDocs.length });
-          if (adminDocs.length > 0) {
-            logger.info('✅ RETURNING admin-upload images from vault', {
-              adminSessionId,
-              userId,
-              count: adminDocs.length,
-              labels: adminDocs.map((d: any) => d.label),
-            });
-            return adminDocs;
-          }
-        }
-        // Admin upload session exists but no vault images found yet.
-        // Skip old KycSession lookup to prevent showing stale DigiLocker/OCR images.
-        // Only fall back to legacy documents stored on user profile.
-        logger.info('⚠️  Admin upload has no vault images yet, skipping old KycSession, checking legacy docs', {
-          adminSessionId,
-          userId,
-        });
-        // Skip KycSession lookup entirely when admin upload was initiated
-        // Jump directly to legacy documents fallback below
-      } else {
-        // 2. Only search KycSession if there's NO fresh admin upload
-        //    Prefer exact verification_id match (DigiLocker / OCR sessions), then fall
-        //    back to the latest OCR session for the user.
-        logger.debug('Searching for KycSession (no admin upload)', { verificationId, userId });
-        let session = verificationId && !verificationId.startsWith('admin_upload_')
-          ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
-              .sort(sessionSort)
-              .lean()
-          : null;
-
-        if (!session?.ocr?.frontImageKey && !session?.ocr?.backImageKey) {
-          session = await KycSession.findOne(
-            { userId, sessionType: 'aadhaar_ocr' },
-            sessionProjection,
-          )
+      logger.debug('Searching for KycSession (no admin upload in vault)', { verificationId, userId });
+      let session = verificationId && !verificationId.startsWith('admin_upload_')
+        ? await KycSession.findOne({ verification_id: verificationId }, sessionProjection)
             .sort(sessionSort)
-            .lean();
-        }
+            .lean()
+        : null;
 
-        if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
-          const keysToSign = await getVaultKeysForSession(
-            userId,
-            verificationId,
-            session?.ocr,
-          );
-          if (keysToSign.length > 0) {
-            const docs = await minioService.getPresignedUrls(keysToSign);
-            if (docs.length > 0) return docs;
-            logger.warn('KycReviewController: KycSession had image keys but presigning returned none', {
-              verificationId,
-              userId,
-              keys: keysToSign.map((item) => item.key),
-            });
-          }
-        } else {
-          logger.debug('KycReviewController: no KycSession OCR image keys found', {
-            verificationId,
-            userId,
-          });
+      if (!session?.ocr?.frontImageKey && !session?.ocr?.backImageKey) {
+        session = await KycSession.findOne(
+          { userId, sessionType: 'aadhaar_ocr' },
+          sessionProjection,
+        )
+          .sort(sessionSort)
+          .lean();
+      }
+
+      if (session?.ocr || (verificationId && !verificationId.startsWith('admin_upload_'))) {
+        const keysToSign = await getVaultKeysForSession(
+          userId,
+          verificationId,
+          session?.ocr,
+        );
+        if (keysToSign.length > 0) {
+          const docs = await minioService.getPresignedUrls(keysToSign);
+          if (docs.length > 0) return docs;
         }
       }
     } catch (error: any) {
@@ -322,12 +344,10 @@ async function getAadhaarDocuments(
     }
   }
 
-  // --- Fallback: legacy documents / imageUrls stored on user profile ---
-  // Used when: admin upload has no vault images yet, OR no KycSession images found
-  logger.info('📦 Checking legacy documents/imageUrls fallback', { userId, adminSessionId, verificationId });
+  // 3. Fallback: legacy documents / imageUrls stored on user profile
+  logger.info('Checking legacy documents/imageUrls fallback', { userId, adminSessionId, verificationId });
   const rawDocuments = user?.aadhaarKyc?.documents;
   if (Array.isArray(rawDocuments) && rawDocuments.length > 0) {
-    logger.info('✅ RETURNING legacy documents', { userId, count: rawDocuments.length, labels: rawDocuments.map((d: any) => d.label) });
     return rawDocuments
       .map((item: any, index: number) => ({
         label: String(item?.label || `Aadhaar image ${index + 1}`),
@@ -337,14 +357,12 @@ async function getAadhaarDocuments(
   }
 
   const imageUrls = Array.isArray(user?.aadhaarKyc?.imageUrls) ? user.aadhaarKyc.imageUrls : [];
-  logger.info('📦 Checking legacy imageUrls fallback', { userId, urlCount: imageUrls.length });
   const result = imageUrls
     .map((url: unknown, index: number) => ({
       label: `Aadhaar image ${index + 1}`,
       url: String(url || ''),
     }))
     .filter((item: { label: string; url: string }) => item.url);
-  logger.info('❌ NO IMAGES FOUND, returning empty/imageUrls result', { userId, count: result.length });
   return result;
 }
 
@@ -952,8 +970,9 @@ export class KycReviewController {
       const search = String(req.query.search || '').trim().toLowerCase();
       const reviewStatus = String(req.query.reviewStatus || 'all').trim().toLowerCase();
       const followUpStatus = String(req.query.followUpStatus || 'all').trim().toLowerCase();
+      const claimStatus = String(req.query.claimStatus || 'all').trim().toLowerCase();
       const includeVerified = String(req.query.includeVerified || 'false').trim().toLowerCase() === 'true';
-      const sortOrder = String(req.query.sortOrder || 'newest').trim().toLowerCase();
+      const sortOrder = String(req.query.sortOrder || 'latest').trim().toLowerCase();
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
@@ -962,6 +981,14 @@ export class KycReviewController {
       // Filter: operations admin only sees unclaimed reviews
       if (!req.admin?.isSuperAdmin) {
         rows = rows.filter((row) => !row.claimedBy);
+      }
+
+      if (claimStatus !== 'all') {
+        if (claimStatus === 'claimed') {
+          rows = rows.filter((row) => !!row.claimedBy);
+        } else if (claimStatus === 'unclaimed') {
+          rows = rows.filter((row) => !row.claimedBy);
+        }
       }
 
       if (reviewStatus !== 'all') {
@@ -1392,7 +1419,7 @@ export class KycReviewController {
       const reviewStatus = String(req.query.reviewStatus || 'all').trim().toLowerCase();
       const followUpStatus = String(req.query.followUpStatus || 'all').trim().toLowerCase();
       const includeVerified = String(req.query.includeVerified || 'false').trim().toLowerCase() === 'true';
-      const sortOrder = String(req.query.sortOrder || 'newest').trim().toLowerCase();
+      const sortOrder = String(req.query.sortOrder || 'latest').trim().toLowerCase();
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
