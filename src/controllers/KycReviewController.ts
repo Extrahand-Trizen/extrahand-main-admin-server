@@ -498,9 +498,9 @@ async function buildReviewRows(req: Request) {
         ? notification.metadata.sessionId
         : undefined);
 
-    // Resolve presigned Aadhaar image URLs from the KYC vault.
-    // For admin uploads, adminSessionId takes priority over verificationId.
-    const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
+    // Resolve presigned Aadhaar image URLs from the KYC vault on demand via getDocuments.
+    // Skip for the list views to optimize performance.
+    const documents: any[] = [];
 
     return {
       notificationId: notification ? String(notification._id) : '',
@@ -654,7 +654,8 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
         ? notification.metadata.sessionId
         : undefined);
 
-    const documents = await getAadhaarDocuments(user, verificationId, userId, adminSessionId);
+    // Skip scanning S3/MinIO in list views to optimize performance.
+    const documents: any[] = [];
 
     return {
       notificationId: notification ? String(notification._id) : '',
