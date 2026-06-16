@@ -185,7 +185,7 @@ export class PaymentController {
         return undefined;
       };
 
-      const transactions = await Promise.all(
+      let transactions = await Promise.all(
         rawTransactions.map(async (row: any) => {
           const posterUid = row.posterUid || row.CustomerUid;
           const [customer, helper, taskTitle] = await Promise.all([
@@ -194,14 +194,19 @@ export class PaymentController {
             resolveTaskTitle(row.taskId),
           ]);
 
+          const customerName = (customer.name || posterUid || '').toString();
+          const isTeamTestByName = customerName.trim().toLowerCase() === 'allam test';
+          const teamTestFlag = typeof row.teamTest === 'boolean' ? row.teamTest : isTeamTestByName;
+
           return {
             ...row,
+            teamTest: teamTestFlag,
             posterUid: posterUid,
             links: {
               customerUserId: customer.userId,
               helperUserId: helper.userId,
               taskId: row.taskId,
-              customerName: customer.name || posterUid,
+              customerName: customerName || posterUid,
               taskTitle: taskTitle || row.taskId,
               helperName: helper.name || row.performerUid,
             },
@@ -209,10 +214,24 @@ export class PaymentController {
         })
       );
 
+      // Apply local transactionType filtering if requested. We derive teamTest above
+      const transactionType = (req.query as any).transactionType as string | undefined;
+      if (transactionType === 'team') {
+        transactions = transactions.filter((t: any) => !!t.teamTest);
+      } else if (transactionType === 'real') {
+        transactions = transactions.filter((t: any) => !t.teamTest);
+      }
+
+      // Apply pagination locally if limit/offset were provided (upstream may have returned unfiltered pages)
+      const limit = Math.min(Number((req.query as any).limit) || 200, 200);
+      const offset = Number((req.query as any).offset) || 0;
+      const total = transactions.length;
+      const paged = transactions.slice(offset, offset + limit);
+
       res.json({
         success: true,
-        data: transactions,
-        total: data.pagination?.total ?? data.total ?? 0,
+        data: paged,
+        total: total,
       });
     } catch (error: any) {
       logger.error('List transactions error:', error);

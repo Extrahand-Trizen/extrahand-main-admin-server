@@ -215,6 +215,9 @@ export class TaskManagementController {
         (req.query.customerId as string) || (req.query.CustomerId as string);
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
+      const requestedStatus = String(req.query.status || '').trim();
+      const isOverdueFilter = requestedStatus === 'overdue';
+
       const assigneeFilter =
         assignedToParam && assignedToParam !== 'all'
           ? resolveAssigneeFilter(assignedToParam)
@@ -223,12 +226,16 @@ export class TaskManagementController {
         ? await resolveAssigneeFilterUserId(assigneeFilter)
         : null;
 
+      // For overdue, we query open tasks from task service and filter by deadline on our side
+      // For open, we exclude overdue tasks (those with past scheduledDate and non-flexible dateOption)
+      const upstreamStatus = isOverdueFilter ? 'open' : requestedStatus;
+
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined,
         search: req.query.search as string,
-        status: req.query.status as string,
-        excludeOverdue: req.query.status === 'open' ? 'true' : (req.query.excludeOverdue as string),
+        status: upstreamStatus,
+        excludeOverdue: requestedStatus === 'open' ? 'true' : undefined,
         category: req.query.category as string,
         CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
@@ -236,24 +243,57 @@ export class TaskManagementController {
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
 
+      // We need local filtering if: overdue filter, followUpStatus filter, or assignee filter
       const needsLocalFilter =
-        (followUpStatus && followUpStatus !== 'all') || Boolean(assigneeFilter);
+        isOverdueFilter ||
+        (followUpStatus && followUpStatus !== 'all') ||
+        Boolean(assigneeFilter);
 
       if (needsLocalFilter) {
         const requestedPage = params.page || 1;
         const requestedLimit = params.limit || 20;
-        const allTasks = await fetchTasksForLocalFiltering({
+
+        // For overdue: fetch all open tasks (no page limit) to filter locally
+        const fetchParams: Record<string, any> = {
           search: params.search,
-          status: params.status,
-          excludeOverdue: params.excludeOverdue,
+          status: upstreamStatus,
           category: params.category,
           CustomerId: params.CustomerId,
           assigneeId: params.assigneeId,
           sortBy: params.sortBy,
           sortOrder: params.sortOrder,
-        });
+        };
+        // Don't send excludeOverdue when fetching for overdue filter
+        // (we want ALL open tasks including overdue ones, then filter locally)
+        if (!isOverdueFilter && params.excludeOverdue) {
+          fetchParams.excludeOverdue = params.excludeOverdue;
+        }
+
+        const allTasks = await fetchTasksForLocalFiltering(fetchParams);
         let enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
         enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
+
+        // Apply overdue filter: open tasks whose scheduledDate has passed (and not flexible)
+        if (isOverdueFilter) {
+          const now = new Date();
+          enrichedTasks = enrichedTasks.filter((task) => {
+            if (task.status !== 'open') return false;
+            if (!task.scheduledDate) return false;
+            if (task.dateOption === 'flexible') return false;
+            return new Date(task.scheduledDate) < now;
+          });
+        }
+
+        // When filtering by 'open' status, strip out tasks whose deadline has passed
+        if (!isOverdueFilter && requestedStatus === 'open') {
+          const now = new Date();
+          enrichedTasks = enrichedTasks.filter((task) => {
+            if (task.status !== 'open') return true;
+            if (!task.scheduledDate) return true;
+            if (task.dateOption === 'flexible') return true;
+            return new Date(task.scheduledDate) >= now;
+          });
+        }
 
         // Apply followUpStatus filter
         if (followUpStatus && followUpStatus !== 'all') {
@@ -292,6 +332,19 @@ export class TaskManagementController {
         : [];
       let enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
       enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
+
+      // When filtering by 'open', exclude tasks whose deadline has already passed
+      // (overdue tasks should only appear when 'overdue' filter is selected)
+      if (requestedStatus === 'open') {
+        const now = new Date();
+        enrichedTasks = enrichedTasks.filter((task) => {
+          if (task.status !== 'open') return true; // keep non-open tasks unchanged
+          if (!task.scheduledDate) return true; // no deadline = not overdue
+          if (task.dateOption === 'flexible') return true; // flexible = not overdue
+          return new Date(task.scheduledDate) >= now; // keep only future deadlines
+        });
+      }
+
       const pagination = extractPagination(result);
       
       res.json({
@@ -307,6 +360,7 @@ export class TaskManagementController {
       });
     }
   }
+
 
   /**
    * GET /api/v1/applications
