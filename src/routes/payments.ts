@@ -37,6 +37,12 @@ router.patch(
   PaymentController.updatePayoutStatus
 );
 
+router.patch(
+  '/payouts/:id/team-test',
+  requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
+  PaymentController.markPayoutTeamTest
+);
+
 router.get(
   '/users/:id/bank-accounts',
   requirePermission(`${Resource.PAYMENT}.${Action.VIEW}`),
@@ -47,6 +53,12 @@ router.get(
   '/refunds',
   requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
   PaymentController.listRefunds
+);
+
+router.patch(
+  '/refunds/:id/team-test',
+  requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
+  PaymentController.markRefundTeamTest
 );
 
 router.get(

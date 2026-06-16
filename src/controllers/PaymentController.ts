@@ -85,9 +85,21 @@ export class PaymentController {
 
   static async listTransactions(req: Request, res: Response): Promise<void> {
     try {
+      // Extract pagination and filter params from frontend request
+      const requestedLimit = Math.min(Number((req.query as any).limit) || 10, 500);
+      const requestedOffset = Number((req.query as any).offset) || 0;
+      const transactionType = (req.query as any).transactionType as string | undefined;
+
+      // Build upstream params: fetch larger batch to account for local filtering
+      const upstreamParams: Record<string, any> = { ...req.query };
+      delete upstreamParams.transactionType; // Remove transactionType to filter locally (after marking Allam Test)
+      // Fetch 5x the requested limit to ensure enough results after filtering
+      upstreamParams.limit = Math.min(requestedLimit * 5, 500);
+      upstreamParams.offset = 0; // Fetch from beginning for accurate local filtering
+
       const data = await safeGet<any>(
         '/api/v1/dashboard/all-transactions',
-        req.query as Record<string, any>,
+        upstreamParams,
         { success: true, total: 0, transactions: [] }
       );
 
@@ -195,8 +207,9 @@ export class PaymentController {
           ]);
 
           const customerName = (customer.name || posterUid || '').toString();
+          // Mark "Allam Test" as team tests by default, OR use existing teamTest flag
           const isTeamTestByName = customerName.trim().toLowerCase() === 'allam test';
-          const teamTestFlag = typeof row.teamTest === 'boolean' ? row.teamTest : isTeamTestByName;
+          const teamTestFlag = isTeamTestByName || (typeof row.teamTest === 'boolean' ? row.teamTest : false);
 
           return {
             ...row,
@@ -214,24 +227,22 @@ export class PaymentController {
         })
       );
 
-      // Apply local transactionType filtering if requested. We derive teamTest above
-      const transactionType = (req.query as any).transactionType as string | undefined;
+      // Apply transactionType filtering locally (after marking Allam Test as team tests)
       if (transactionType === 'team') {
         transactions = transactions.filter((t: any) => !!t.teamTest);
       } else if (transactionType === 'real') {
         transactions = transactions.filter((t: any) => !t.teamTest);
       }
 
-      // Apply pagination locally if limit/offset were provided (upstream may have returned unfiltered pages)
-      const limit = Math.min(Number((req.query as any).limit) || 200, 200);
-      const offset = Number((req.query as any).offset) || 0;
-      const total = transactions.length;
+      // Apply pagination locally on the fully filtered result set
+      const limit = requestedLimit;
+      const offset = requestedOffset;
       const paged = transactions.slice(offset, offset + limit);
 
       res.json({
         success: true,
         data: paged,
-        total: total,
+        total: transactions.length,
       });
     } catch (error: any) {
       logger.error('List transactions error:', error);
@@ -286,15 +297,41 @@ export class PaymentController {
     }
   }
 
+  static async markPayoutTeamTest(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { teamTest } = req.body || {};
+      if (!id) {
+        throw new Error('Payout id is required');
+      }
+      if (typeof teamTest !== 'boolean') {
+        throw new Error('teamTest must be a boolean');
+      }
+
+      const payload = await paymentServiceClient.patch(`/api/v1/dashboard/payouts/${id}/team-test`, { teamTest });
+      res.json({ success: true, data: payload });
+    } catch (error: any) {
+      logger.error('Mark payout team test error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to update payout transaction type',
+      });
+    }
+  }
+
   static async listPayouts(req: Request, res: Response): Promise<void> {
     try {
+      const requestedLimit = Math.min(Number((req.query as any).limit) || 10, 200);
+      const requestedOffset = Number((req.query as any).offset) || 0;
+      const transactionType = (req.query as any).transactionType as string | undefined;
       const q = (req.query as any).q as string | undefined;
       const params: Record<string, any> = {
         ...(req.query as Record<string, any>),
         ...(q ? { q } : {}),
-        limit: Math.min(Number(req.query.limit) || 200, 200),
-        offset: Number(req.query.offset) || 0,
+        limit: Math.min(requestedLimit * 5, 200),
+        offset: 0,
       };
+      delete params.transactionType;
       delete params.q;
 
       const data = await safeGet<any>('/api/v1/admin/payouts', params, {
@@ -304,23 +341,70 @@ export class PaymentController {
       });
 
       const rawRows = data.data ?? data.payouts ?? data.items ?? [];
-      const rows = rawRows.map((row: any) => ({
-        payoutId: row.payoutId,
-        performerUid: row.performerUid,
-        taskId: row.taskId || row.escrow?.taskId || null,
-        CustomerUid: row.CustomerUid || row.escrow?.posterUid || null,
-        amount: String(row.amount ?? ''),
-        netAmount: String(row.netAmount ?? ''),
-        status: row.status,
-        source: row.source || row.type || null,
-        type: row.type || null,
-        createdAt: row.createdAt,
-      }));
+      const uniqueCustomerUids = new Set<string>();
+      rawRows.forEach((row: any) => {
+        const customerUid = row.CustomerUid || row.escrow?.posterUid || row.customerUid || row.posterUid;
+        if (customerUid) uniqueCustomerUids.add(customerUid);
+      });
+
+      const customerNameByUid = new Map<string, string>();
+      if (uniqueCustomerUids.size > 0) {
+        try {
+          const profilesResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueCustomerUids));
+          const profiles = profilesResult?.profiles ?? [];
+          profiles.forEach((profile: any) => {
+            const customerName =
+              profile?.name ||
+              [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
+            if (profile?.uid) {
+              customerNameByUid.set(profile.uid, customerName);
+            }
+          });
+        } catch (err) {
+          logger.warn('Batch payout customer resolution failed, falling back to raw values');
+        }
+      }
+
+      const rows = rawRows.map((row: any) => {
+        const customerUid = row.CustomerUid || row.escrow?.posterUid || row.customerUid || row.posterUid || null;
+        const customerName =
+          String(row.customerName || row.CustomerName || customerNameByUid.get(customerUid || '') || '').trim();
+        const rawTeamTest =
+          typeof row.teamTest === 'boolean'
+            ? row.teamTest
+            : typeof row.metadata?.teamTest === 'boolean'
+            ? row.metadata.teamTest
+            : false;
+        const teamTest = rawTeamTest || customerName.toLowerCase() === 'allam test';
+
+        return {
+          payoutId: row.payoutId,
+          performerUid: row.performerUid,
+          taskId: row.taskId || row.escrow?.taskId || null,
+          CustomerUid: row.CustomerUid || row.escrow?.posterUid || null,
+          amount: String(row.amount ?? ''),
+          netAmount: String(row.netAmount ?? ''),
+          status: row.status,
+          source: row.source || row.type || null,
+          type: row.type || null,
+          createdAt: row.createdAt,
+          teamTest,
+        };
+      });
+
+      let filteredRows = rows;
+      if (transactionType === 'team') {
+        filteredRows = rows.filter((row: any) => !!row.teamTest);
+      } else if (transactionType === 'real') {
+        filteredRows = rows.filter((row: any) => !row.teamTest);
+      }
+
+      const paged = filteredRows.slice(requestedOffset, requestedOffset + requestedLimit);
 
       res.json({
         success: true,
-        data: rows,
-        total: data.pagination?.total ?? data.total ?? rows.length,
+        data: paged,
+        total: filteredRows.length,
       });
     } catch (error: any) {
       logger.error('List payouts error:', error);
@@ -331,17 +415,108 @@ export class PaymentController {
     }
   }
 
+  static async markRefundTeamTest(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { teamTest } = req.body || {};
+      if (!id) {
+        throw new Error('Refund id is required');
+      }
+      if (typeof teamTest !== 'boolean') {
+        throw new Error('teamTest must be a boolean');
+      }
+
+      const payload = await paymentServiceClient.patch(`/api/v1/dashboard/refunds/${id}/team-test`, { teamTest });
+      res.json({ success: true, data: payload });
+    } catch (error: any) {
+      logger.error('Mark refund team test error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to update refund transaction type',
+      });
+    }
+  }
+
   static async listRefunds(req: Request, res: Response): Promise<void> {
     try {
+      const requestedLimit = Math.min(Number((req.query as any).limit) || 10, 200);
+      const requestedOffset = Number((req.query as any).offset) || 0;
+      const transactionType = (req.query as any).transactionType as string | undefined;
+      const params: Record<string, any> = {
+        ...(req.query as Record<string, any>),
+        limit: Math.min(requestedLimit * 5, 200),
+        offset: 0,
+      };
+      delete params.transactionType;
+
       const data = await safeGet<any>(
         '/api/v1/dashboard/refunds',
-        req.query as Record<string, any>,
+        params,
         { success: true, items: [], total: 0 }
       );
+
+      const rawRows = data.refunds ?? data.items ?? [];
+      const uniqueCustomerUids = new Set<string>();
+      rawRows.forEach((row: any) => {
+        const customerUid = row.CustomerUid || row.escrow?.posterUid || row.customerUid || row.posterUid;
+        if (customerUid) uniqueCustomerUids.add(customerUid);
+      });
+
+      const customerNameByUid = new Map<string, string>();
+      if (uniqueCustomerUids.size > 0) {
+        try {
+          const profilesResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueCustomerUids));
+          const profiles = profilesResult?.profiles ?? [];
+          profiles.forEach((profile: any) => {
+            const customerName =
+              profile?.name ||
+              [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
+            if (profile?.uid) {
+              customerNameByUid.set(profile.uid, customerName);
+            }
+          });
+        } catch (err) {
+          logger.warn('Batch refund customer resolution failed, falling back to raw values');
+        }
+      }
+
+      const rows = rawRows.map((row: any) => {
+        const customerUid = row.CustomerUid || row.escrow?.posterUid || row.customerUid || row.posterUid || null;
+        const customerName =
+          String(row.customerName || row.CustomerName || customerNameByUid.get(customerUid || '') || '').trim();
+        const rawTeamTest =
+          typeof row.teamTest === 'boolean'
+            ? row.teamTest
+            : typeof row.metadata?.teamTest === 'boolean'
+            ? row.metadata.teamTest
+            : false;
+        const teamTest = rawTeamTest || customerName.toLowerCase() === 'allam test';
+
+        return {
+          refundId: row.refundId,
+          paymentId: row.paymentId,
+          taskId: row.taskId,
+          CustomerUid: row.CustomerUid || row.escrow?.posterUid || null,
+          performerUid: row.performerUid,
+          refundAmount: String(row.refundAmount ?? ''),
+          status: row.status,
+          createdAt: row.createdAt,
+          teamTest,
+        };
+      });
+
+      let filteredRows = rows;
+      if (transactionType === 'team') {
+        filteredRows = rows.filter((row: any) => !!row.teamTest);
+      } else if (transactionType === 'real') {
+        filteredRows = rows.filter((row: any) => !row.teamTest);
+      }
+
+      const paged = filteredRows.slice(requestedOffset, requestedOffset + requestedLimit);
       res.json({
         success: true,
-        data: data.refunds ?? data.items ?? [],
-        total: data.total ?? 0,
+        data: paged,
+        total: filteredRows.length,
       });
     } catch (error: any) {
       logger.error('List refunds error:', error);
