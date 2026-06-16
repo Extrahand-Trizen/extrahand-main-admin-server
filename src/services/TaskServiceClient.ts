@@ -66,6 +66,7 @@ export class TaskServiceClient {
     limit?: number;
     search?: string;
     status?: string;
+    excludeOverdue?: string;
     category?: string;
     CustomerId?: string;
     assigneeId?: string;

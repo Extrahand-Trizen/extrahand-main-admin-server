@@ -228,6 +228,7 @@ export class TaskManagementController {
         limit: req.query.limit ? Number(req.query.limit) : undefined,
         search: req.query.search as string,
         status: req.query.status as string,
+        excludeOverdue: req.query.status === 'open' ? 'true' : (req.query.excludeOverdue as string),
         category: req.query.category as string,
         CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
@@ -244,6 +245,7 @@ export class TaskManagementController {
         const allTasks = await fetchTasksForLocalFiltering({
           search: params.search,
           status: params.status,
+          excludeOverdue: params.excludeOverdue,
           category: params.category,
           CustomerId: params.CustomerId,
           assigneeId: params.assigneeId,
