@@ -67,4 +67,23 @@ router.get(
   PaymentController.listLedger
 );
 
+router.delete(
+  '/transactions/:id',
+  requirePermission(`${Resource.PAYMENT}.${Action.DELETE}`),
+  PaymentController.deleteTransaction
+);
+
+router.delete(
+  '/payouts/:id',
+  requirePermission(`${Resource.PAYMENT}.${Action.DELETE}`),
+  PaymentController.deletePayout
+);
+
+router.delete(
+  '/refunds/:id',
+  requirePermission(`${Resource.PAYMENT}.${Action.DELETE}`),
+  PaymentController.deleteRefund
+);
+
 export default router;
+

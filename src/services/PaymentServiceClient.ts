@@ -39,6 +39,12 @@ export class PaymentServiceClient {
     const response = await this.client.patch(path, body);
     return response.data;
   }
+
+  async delete(path: string): Promise<any> {
+    const response = await this.client.delete(path);
+    return response.data;
+  }
 }
 
 export const paymentServiceClient = new PaymentServiceClient();
+

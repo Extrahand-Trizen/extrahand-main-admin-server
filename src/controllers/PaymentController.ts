@@ -573,4 +573,47 @@ export class PaymentController {
       });
     }
   }
+
+  static async deleteTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const data = await paymentServiceClient.delete(`/api/v1/dashboard/transactions/${encodeURIComponent(id)}`);
+      res.json(data);
+    } catch (error: any) {
+      logger.error('Delete transaction error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to delete transaction',
+      });
+    }
+  }
+
+  static async deletePayout(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const data = await paymentServiceClient.delete(`/api/v1/dashboard/payouts/${encodeURIComponent(id)}`);
+      res.json(data);
+    } catch (error: any) {
+      logger.error('Delete payout error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to delete payout',
+      });
+    }
+  }
+
+  static async deleteRefund(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const data = await paymentServiceClient.delete(`/api/v1/dashboard/refunds/${encodeURIComponent(id)}`);
+      res.json(data);
+    } catch (error: any) {
+      logger.error('Delete refund error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to delete refund',
+      });
+    }
+  }
 }
+
