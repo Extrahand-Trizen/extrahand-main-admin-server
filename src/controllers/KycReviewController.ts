@@ -67,6 +67,55 @@ function resolveProfileUid(user: any, fallbackUserId: string): string {
   return String(user?.uid || user?.userId || fallbackUserId).trim();
 }
 
+/**
+ * Collapse alternate userId keys (legacy ids, notification ids) to one row per profile.
+ */
+function dedupeReviewUserIds(
+  userIds: string[],
+  resolvedUserMap: Map<string, { user: any; profileUid: string }>,
+  latestByUserId: Map<string, any>,
+): { dedupedUserIds: string[]; notificationByProfileUid: Map<string, any> } {
+  const canonicalUserIdByProfileUid = new Map<string, string>();
+  const notificationByProfileUid = new Map<string, any>();
+
+  for (const userId of userIds) {
+    const resolved = resolvedUserMap.get(userId);
+    const profileUid = resolved?.profileUid || userId;
+    const notification = latestByUserId.get(userId);
+
+    if (notification) {
+      const existing = notificationByProfileUid.get(profileUid);
+      if (
+        !existing ||
+        new Date(notification.createdAt || 0).getTime() >
+          new Date(existing.createdAt || 0).getTime()
+      ) {
+        notificationByProfileUid.set(profileUid, notification);
+      }
+    }
+
+    const existingUserId = canonicalUserIdByProfileUid.get(profileUid);
+    if (!existingUserId) {
+      canonicalUserIdByProfileUid.set(profileUid, profileUid);
+      continue;
+    }
+
+    if (userId === profileUid) {
+      canonicalUserIdByProfileUid.set(profileUid, profileUid);
+      continue;
+    }
+
+    if (latestByUserId.has(userId) && !latestByUserId.has(existingUserId)) {
+      canonicalUserIdByProfileUid.set(profileUid, userId);
+    }
+  }
+
+  return {
+    dedupedUserIds: Array.from(canonicalUserIdByProfileUid.values()),
+    notificationByProfileUid,
+  };
+}
+
 function isProfileAadhaarVerified(user: any): boolean {
   if (!user) return false;
   if (user.isAadhaarVerified === true) return true;
@@ -114,6 +163,24 @@ function normalizeReviewStatus(value: unknown): KycReviewStatus | null {
 function normalizeFollowUpStatus(value: unknown): KycFollowUpStatus | null {
   const status = String(value || '').trim().toLowerCase();
   if (FOLLOW_UP_STATUSES.includes(status as KycFollowUpStatus)) return status as KycFollowUpStatus;
+  return null;
+}
+
+function effectiveClaimedBy(review: any) {
+  if (!review) return null;
+  if (review.claimedBy) return review.claimedBy;
+  if (review.reviewedBy && (review.followUpStatus !== 'none' || review.reviewStatus !== 'pending')) {
+    return review.reviewedBy;
+  }
+  return null;
+}
+
+function effectiveClaimedAt(review: any) {
+  if (!review) return null;
+  if (review.claimedAt) return review.claimedAt;
+  if (review.reviewedBy && (review.followUpStatus !== 'none' || review.reviewStatus !== 'pending')) {
+    return review.reviewedAt || review.updatedAt || null;
+  }
   return null;
 }
 
@@ -384,7 +451,7 @@ async function buildReviewRows(req: Request) {
     latestByUserId.set(userId, notification);
   }
 
-  // Also query KycReview and KycSession to collect other userIds (expired and reuploadeds)
+  // Also query KycReview and KycSession to collect userIds missing from notifications (re-uploads).
   const [pendingReviews, kycSessions] = await Promise.all([
     KycReview.find({
       $or: [
@@ -432,9 +499,18 @@ async function buildReviewRows(req: Request) {
   const allLookupIds = new Set<string>();
   for (const item of resolvedUsers) {
     resolvedUserMap.set(item.userId, { user: item.user, profileUid: item.profileUid });
+    if (!resolvedUserMap.has(item.profileUid)) {
+      resolvedUserMap.set(item.profileUid, { user: item.user, profileUid: item.profileUid });
+    }
     allLookupIds.add(item.userId);
     allLookupIds.add(item.profileUid);
   }
+
+  const { dedupedUserIds, notificationByProfileUid } = dedupeReviewUserIds(
+    userIds,
+    resolvedUserMap,
+    latestByUserId,
+  );
 
   const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } })
     .sort({ updatedAt: -1 })
@@ -455,11 +531,12 @@ async function buildReviewRows(req: Request) {
     }
   }
 
-  const rowPromises = userIds.map(async (userId) => {
-    const notification = latestByUserId.get(userId);
+  const rowPromises = dedupedUserIds.map(async (userId) => {
     const resolved = resolvedUserMap.get(userId);
     const user = resolved?.user || null;
     const profileUid = resolved?.profileUid || userId;
+    const notification =
+      notificationByProfileUid.get(profileUid) || latestByUserId.get(userId) || null;
 
     // aadhaarKyc.verificationId = the `verification_id` (eh_...) string stored in KycSession.
     // aadhaarKyc.id             = MongoDB _id — do NOT use for KycSession lookup.
@@ -478,8 +555,8 @@ async function buildReviewRows(req: Request) {
     const hasNewUploadAfterReview =
       !Boolean(sessionId === review?.sessionId) && Boolean(sessionId) && Boolean(review?.sessionId);
 
-    const claimedBy = review?.claimedBy || null;
-    const claimedAt = review?.claimedAt || null;
+    const claimedBy = effectiveClaimedBy(review);
+    const claimedAt = effectiveClaimedAt(review);
 
     // Detect manual admin-upload sessions (sessionId starts with "admin_upload_").
     // The review document holds the canonical admin sessionId even when verificationId
@@ -640,8 +717,8 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
     const hasNewUploadAfterReview =
       !Boolean(sessionId === review?.sessionId) && Boolean(sessionId) && Boolean(review?.sessionId);
 
-    const claimedBy = review?.claimedBy || null;
-    const claimedAt = review?.claimedAt || null;
+    const claimedBy = effectiveClaimedBy(review);
+    const claimedAt = effectiveClaimedAt(review);
 
     const isManualUpload = Boolean(review?.sessionId && String(review.sessionId).startsWith('admin_upload_'));
     const uploadedBy = review?.uploadedBy || null;
@@ -792,8 +869,8 @@ export class KycReviewController {
           uploadedAt: review.updatedAt,
           reviewStatus: review.reviewStatus,
           nextSessionId,
-          claimedBy: review.claimedBy || null,
-          claimedAt: review.claimedAt || null,
+          claimedBy: effectiveClaimedBy(review),
+          claimedAt: effectiveClaimedAt(review),
         },
       });
     } catch (error: any) {
@@ -810,7 +887,8 @@ export class KycReviewController {
 
       // Restrict upload if claimed by someone else
       const review = await KycReview.findOne({ userId }).sort({ updatedAt: -1 }).lean();
-      if (review && review.claimedBy && review.claimedBy.userId !== req.admin!.userId && !req.admin!.isSuperAdmin) {
+      const owner = effectiveClaimedBy(review);
+      if (owner && owner.userId !== req.admin!.userId && !req.admin!.isSuperAdmin) {
         res.status(403).json({ success: false, error: 'This review is claimed by another admin' });
         return;
       }
@@ -1209,6 +1287,8 @@ export class KycReviewController {
             rejectionReason: String(reason || '').trim(),
             reviewedBy: actor(req),
             reviewedAt: new Date(),
+            claimedBy: actor(req),
+            claimedAt: new Date(),
           },
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },
@@ -1259,6 +1339,8 @@ export class KycReviewController {
             followUpDate: followUpStatus === 'follow_up' ? followUpDate : null,
             reviewedBy: actor(req),
             reviewedAt: new Date(),
+            claimedBy: actor(req),
+            claimedAt: new Date(),
             ...(reviewStatus === 'pending' ? { rejectionReason: '' } : {}),
           },
         },
@@ -1437,7 +1519,24 @@ export class KycReviewController {
       // for My Claims and ensures claimed leads are never dropped, even if they don't
       // appear in the notification window or have non-pending KycSession statuses.
       let claimedReviews = await KycReview.find({
-        'claimedBy.userId': adminUserId,
+        $or: [
+          { 'claimedBy.userId': adminUserId },
+          { 'claimedBy.email': req.admin!.email },
+          {
+            'reviewedBy.userId': adminUserId,
+            $or: [
+              { followUpStatus: { $ne: 'none' } },
+              { reviewStatus: { $ne: 'pending' } },
+            ],
+          },
+          {
+            'reviewedBy.email': req.admin!.email,
+            $or: [
+              { followUpStatus: { $ne: 'none' } },
+              { reviewStatus: { $ne: 'pending' } },
+            ],
+          },
+        ],
       }).lean();
       
       logger.debug('My Claims database query (by userId)', {
@@ -1448,20 +1547,6 @@ export class KycReviewController {
         firstReviewClaimedBy: claimedReviews[0]?.claimedBy,
       });
 
-      // FALLBACK: If no reviews found by userId, try by email (handles userId mismatch scenarios)
-      if (claimedReviews.length === 0) {
-        logger.warn('No claimed reviews found by userId, trying by email', { adminUserId, adminEmail: req.admin!.email });
-        claimedReviews = await KycReview.find({
-          'claimedBy.email': req.admin!.email,
-        }).lean();
-        
-        logger.debug('My Claims database query (by email fallback)', {
-          adminUserId,
-          adminEmail: req.admin!.email,
-          claimedReviewsCount: claimedReviews.length,
-        });
-      }
-      
       const claimedUserIds = claimedReviews.map((r) => String(r.userId || '').trim()).filter(Boolean);
 
       // For myClaims, build rows DIRECTLY from claimed KycReview records
@@ -1548,8 +1633,10 @@ export class KycReviewController {
             followUpDate: review.followUpDate ? new Date(review.followUpDate).toISOString() : null,
             registeredAt: user?.registeredAt ? new Date(user.registeredAt).toISOString() : null,
             assignedTo: [], // Not applicable for my-claims
-            claimedBy: review.claimedBy || null,
-            claimedAt: review.claimedAt ? new Date(review.claimedAt).toISOString() : null,
+            claimedBy: effectiveClaimedBy(review),
+            claimedAt: effectiveClaimedAt(review)
+              ? new Date(effectiveClaimedAt(review)).toISOString()
+              : null,
             reviewStatus: review.reviewStatus || 'pending',
             reviewedBy: review.reviewedBy || null,
             reviewedAt: review.reviewedAt ? new Date(review.reviewedAt).toISOString() : null,
@@ -1571,7 +1658,11 @@ export class KycReviewController {
         });
       }
 
-      rows = rows.filter((row) => row.claimedBy?.userId === req.admin!.userId);
+      rows = rows.filter(
+        (row) =>
+          row.claimedBy?.userId === req.admin!.userId ||
+          row.claimedBy?.email === req.admin!.email,
+      );
 
       if (reviewStatus !== 'all') {
         if (isAcceptedFilter(reviewStatus)) {
