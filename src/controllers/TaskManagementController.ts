@@ -216,6 +216,7 @@ export class TaskManagementController {
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
       const requestedStatus = String(req.query.status || '').trim();
+      const bookingSource = String(req.query.bookingSource || '').trim();
       const isOverdueFilter = requestedStatus === 'overdue';
 
       const assigneeFilter =
@@ -239,11 +240,15 @@ export class TaskManagementController {
         category: req.query.category as string,
         CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
+        // Pass bookingSource directly to task service so it filters at DB level
+        // (bypasses the marketplace-only clause for book_now / posted_task)
+        bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : undefined,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
 
       // We need local filtering if: overdue filter, followUpStatus filter, or assignee filter
+      // bookingSource is now handled upstream by the task service
       const needsLocalFilter =
         isOverdueFilter ||
         (followUpStatus && followUpStatus !== 'all') ||
@@ -260,6 +265,7 @@ export class TaskManagementController {
           category: params.category,
           CustomerId: params.CustomerId,
           assigneeId: params.assigneeId,
+          bookingSource: params.bookingSource,
           sortBy: params.sortBy,
           sortOrder: params.sortOrder,
         };

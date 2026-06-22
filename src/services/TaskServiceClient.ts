@@ -70,6 +70,7 @@ export class TaskServiceClient {
     category?: string;
     CustomerId?: string;
     assigneeId?: string;
+    bookingSource?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<any> {
