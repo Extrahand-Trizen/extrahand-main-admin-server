@@ -609,6 +609,58 @@ export class TaskManagementController {
   }
 
   /**
+   * POST /api/v1/tasks/:taskId/assign
+   * Assign a helper to a Book Now task.
+   */
+  static async assignHelper(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+      const { helperUid, helperProfileId } = req.body;
+      const adminUserId = (req.admin as any)?.userId;
+
+      if (!helperUid || !helperProfileId) {
+        res.status(400).json({ success: false, error: 'helperUid and helperProfileId are required' });
+        return;
+      }
+
+      // Resolve booking order info for this task
+      const bookingInfo = await taskServiceClient.getBookingByTaskId(taskId);
+      if (!bookingInfo?.success || !bookingInfo?.data) {
+        res.status(404).json({ success: false, error: 'Booking not found for this task' });
+        return;
+      }
+
+      const { orderId, bookingItemId } = bookingInfo.data;
+
+      const result = await taskServiceClient.assignHelper({
+        orderId,
+        helperUid,
+        helperProfileId,
+        bookingItemId: bookingItemId || undefined,
+      }, adminUserId);
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.assign_helper`,
+        Resource.TASK,
+        taskId,
+        { helperUid, helperProfileId, orderId }
+      );
+
+      res.json({
+        success: true,
+        data: result.data || result,
+      });
+    } catch (error: any) {
+      logger.error('Assign helper error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to assign helper',
+      });
+    }
+  }
+
+  /**
    * POST /api/v1/tasks/:taskId/delete-requests
    * Operations creates a delete request for Super Admin approval.
    */

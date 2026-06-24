@@ -170,6 +170,32 @@ export class TaskServiceClient {
     return response.data;
   }
 
+  /**
+   * Assign a helper to a Book Now task via task service.
+   * adminUserId is passed as X-User-Id so task service records the acting admin.
+   */
+  async assignHelper(params: {
+    orderId: string;
+    helperUid: string;
+    helperProfileId: string;
+    bookingItemId?: string;
+  }, adminUserId?: string): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (adminUserId) {
+      headers['X-User-Id'] = adminUserId;
+    }
+    const response = await this.client.post('/api/v1/admin/assignments/assign', params, { headers });
+    return response.data;
+  }
+
+  /**
+   * Get booking order info for a task (admin endpoint, no ownership check).
+   */
+  async getBookingByTaskId(taskId: string): Promise<any> {
+    const response = await this.client.get(`/api/v1/admin/assignments/by-task/${taskId}`);
+    return response.data;
+  }
+
   async getCustomerAnalytics(requesterId: string, range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
     const response = await this.client.get(`/api/v1/analytics/Customers/${requesterId}`, {
       params: { range },
