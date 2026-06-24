@@ -85,17 +85,14 @@ export class PaymentController {
 
   static async listTransactions(req: Request, res: Response): Promise<void> {
     try {
-      // Extract pagination and filter params from frontend request
       const requestedLimit = Math.min(Number((req.query as any).limit) || 10, 500);
       const requestedOffset = Number((req.query as any).offset) || 0;
       const transactionType = (req.query as any).transactionType as string | undefined;
 
-      // Build upstream params: fetch larger batch to account for local filtering
       const upstreamParams: Record<string, any> = { ...req.query };
-      delete upstreamParams.transactionType; // Remove transactionType to filter locally (after marking Allam Test)
-      // Fetch 5x the requested limit to ensure enough results after filtering
-      upstreamParams.limit = Math.min(requestedLimit * 5, 500);
-      upstreamParams.offset = 0; // Fetch from beginning for accurate local filtering
+      if (transactionType === 'all') {
+        delete upstreamParams.transactionType;
+      }
 
       const data = await safeGet<any>(
         '/api/v1/dashboard/all-transactions',
@@ -227,22 +224,12 @@ export class PaymentController {
         })
       );
 
-      // Apply transactionType filtering locally (after marking Allam Test as team tests)
-      if (transactionType === 'team') {
-        transactions = transactions.filter((t: any) => !!t.teamTest);
-      } else if (transactionType === 'real') {
-        transactions = transactions.filter((t: any) => !t.teamTest);
-      }
-
-      // Apply pagination locally on the fully filtered result set
-      const limit = requestedLimit;
-      const offset = requestedOffset;
-      const paged = transactions.slice(offset, offset + limit);
+      const total = data.pagination?.total ?? data.total ?? transactions.length;
 
       res.json({
         success: true,
-        data: paged,
-        total: transactions.length,
+        data: transactions,
+        total: total,
       });
     } catch (error: any) {
       logger.error('List transactions error:', error);
@@ -328,10 +315,10 @@ export class PaymentController {
       const params: Record<string, any> = {
         ...(req.query as Record<string, any>),
         ...(q ? { q } : {}),
-        limit: Math.min(requestedLimit * 5, 200),
-        offset: 0,
       };
-      delete params.transactionType;
+      if (transactionType === 'all') {
+        delete params.transactionType;
+      }
       delete params.q;
 
       const data = await safeGet<any>('/api/v1/admin/payouts', params, {
@@ -392,19 +379,12 @@ export class PaymentController {
         };
       });
 
-      let filteredRows = rows;
-      if (transactionType === 'team') {
-        filteredRows = rows.filter((row: any) => !!row.teamTest);
-      } else if (transactionType === 'real') {
-        filteredRows = rows.filter((row: any) => !row.teamTest);
-      }
-
-      const paged = filteredRows.slice(requestedOffset, requestedOffset + requestedLimit);
+      const total = data.pagination?.total ?? data.total ?? rows.length;
 
       res.json({
         success: true,
-        data: paged,
-        total: filteredRows.length,
+        data: rows,
+        total: total,
       });
     } catch (error: any) {
       logger.error('List payouts error:', error);
@@ -444,10 +424,10 @@ export class PaymentController {
       const transactionType = (req.query as any).transactionType as string | undefined;
       const params: Record<string, any> = {
         ...(req.query as Record<string, any>),
-        limit: Math.min(requestedLimit * 5, 200),
-        offset: 0,
       };
-      delete params.transactionType;
+      if (transactionType === 'all') {
+        delete params.transactionType;
+      }
 
       const data = await safeGet<any>(
         '/api/v1/dashboard/refunds',
@@ -505,18 +485,11 @@ export class PaymentController {
         };
       });
 
-      let filteredRows = rows;
-      if (transactionType === 'team') {
-        filteredRows = rows.filter((row: any) => !!row.teamTest);
-      } else if (transactionType === 'real') {
-        filteredRows = rows.filter((row: any) => !row.teamTest);
-      }
-
-      const paged = filteredRows.slice(requestedOffset, requestedOffset + requestedLimit);
+      const total = data.pagination?.total ?? data.total ?? rows.length;
       res.json({
         success: true,
-        data: paged,
-        total: filteredRows.length,
+        data: rows,
+        total: total,
       });
     } catch (error: any) {
       logger.error('List refunds error:', error);

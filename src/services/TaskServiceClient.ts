@@ -178,6 +178,7 @@ export class TaskServiceClient {
     orderId: string;
     helperUid: string;
     helperProfileId: string;
+    helperName?: string;
     bookingItemId?: string;
   }, adminUserId?: string): Promise<any> {
     const headers: Record<string, string> = {};
@@ -185,6 +186,23 @@ export class TaskServiceClient {
       headers['X-User-Id'] = adminUserId;
     }
     const response = await this.client.post('/api/v1/admin/assignments/assign', params, { headers });
+    return response.data;
+  }
+
+  /**
+   * Directly assign a helper to a task (fallback).
+   */
+  async assignHelperDirect(params: {
+    taskId: string;
+    helperUid: string;
+    helperProfileId: string;
+    helperName?: string;
+  }, adminUserId?: string): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (adminUserId) {
+      headers['X-User-Id'] = adminUserId;
+    }
+    const response = await this.client.post('/api/v1/admin/assignments/assign-direct', params, { headers });
     return response.data;
   }
 

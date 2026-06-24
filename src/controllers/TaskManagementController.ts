@@ -615,7 +615,7 @@ export class TaskManagementController {
   static async assignHelper(req: Request, res: Response): Promise<void> {
     try {
       const { taskId } = req.params;
-      const { helperUid, helperProfileId } = req.body;
+      const { helperUid, helperProfileId, helperName } = req.body;
       const adminUserId = (req.admin as any)?.userId;
 
       if (!helperUid || !helperProfileId) {
@@ -624,38 +624,63 @@ export class TaskManagementController {
       }
 
       // Resolve booking order info for this task
-      const bookingInfo = await taskServiceClient.getBookingByTaskId(taskId);
-      if (!bookingInfo?.success || !bookingInfo?.data) {
-        res.status(404).json({ success: false, error: 'Booking not found for this task' });
-        return;
+      let bookingInfo;
+      try {
+        bookingInfo = await taskServiceClient.getBookingByTaskId(taskId);
+      } catch (err: any) {
+        logger.info(`Booking info not found for task ${taskId}: ${err.message}. Using direct assignment fallback.`);
       }
 
-      const { orderId, bookingItemId } = bookingInfo.data;
+      if (bookingInfo?.success && bookingInfo?.data) {
+        const { orderId, bookingItemId } = bookingInfo.data;
 
-      const result = await taskServiceClient.assignHelper({
-        orderId,
-        helperUid,
-        helperProfileId,
-        bookingItemId: bookingItemId || undefined,
-      }, adminUserId);
+        const result = await taskServiceClient.assignHelper({
+          orderId,
+          helperUid,
+          helperProfileId,
+          helperName,
+          bookingItemId: bookingItemId || undefined,
+        }, adminUserId);
 
-      await createAuditLog(
-        req,
-        `${Resource.TASK}.assign_helper`,
-        Resource.TASK,
-        taskId,
-        { helperUid, helperProfileId, orderId }
-      );
+        await createAuditLog(
+          req,
+          `${Resource.TASK}.assign_helper`,
+          Resource.TASK,
+          taskId,
+          { helperUid, helperProfileId, orderId }
+        );
 
-      res.json({
-        success: true,
-        data: result.data || result,
-      });
+        res.json({
+          success: true,
+          data: result.data || result,
+        });
+      } else {
+        logger.info(`Using direct helper assignment fallback for task ${taskId}`);
+        const result = await taskServiceClient.assignHelperDirect({
+          taskId,
+          helperUid,
+          helperProfileId,
+          helperName,
+        }, adminUserId);
+
+        await createAuditLog(
+          req,
+          `${Resource.TASK}.assign_helper_direct`,
+          Resource.TASK,
+          taskId,
+          { helperUid, helperProfileId }
+        );
+
+        res.json({
+          success: true,
+          data: result.data || result,
+        });
+      }
     } catch (error: any) {
       logger.error('Assign helper error:', error);
       res.status(getClientSafeStatus(error)).json({
         success: false,
-        error: error.response?.data?.error || 'Failed to assign helper',
+        error: error.response?.data?.error || error.message || 'Failed to assign helper',
       });
     }
   }
