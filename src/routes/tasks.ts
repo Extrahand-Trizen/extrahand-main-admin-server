@@ -90,6 +90,12 @@ router.post(
 );
 
 router.post(
+  '/:taskId/unassign',
+  requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
+  TaskManagementController.unassignHelper
+);
+
+router.post(
   '/:taskId/assign',
   requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
   TaskManagementController.assignHelper

@@ -612,6 +612,35 @@ export class TaskManagementController {
    * POST /api/v1/tasks/:taskId/assign
    * Assign a helper to a Book Now task.
    */
+  static async unassignHelper(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+      const { escrowId } = req.body;
+      const adminUserId = (req.admin as any)?.userId;
+
+      const result = await taskServiceClient.unassignHelper({ taskId, escrowId }, adminUserId);
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.assign_helper`,
+        Resource.TASK,
+        taskId,
+        { action: 'unassigned', escrowId }
+      );
+
+      res.json({
+        success: true,
+        data: result.data || result,
+      });
+    } catch (error: any) {
+      logger.error('Unassign helper error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || error.message || 'Failed to unassign helper',
+      });
+    }
+  }
+
   static async assignHelper(req: Request, res: Response): Promise<void> {
     try {
       const { taskId } = req.params;

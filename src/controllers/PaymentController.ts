@@ -116,66 +116,96 @@ export class PaymentController {
         if (row.taskId) uniqueTaskIds.add(row.taskId);
       });
 
-      // Batch fetch users and task titles
-      await Promise.all([
-        (async () => {
-          if (uniqueUids.size > 0) {
-            try {
-              const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
-              (usersResult?.profiles || []).forEach((u: any) => {
-                userCache.set(u.uid, { userId: u.uid, name: u.name });
-              });
-            } catch (err) {
-              logger.warn('Batch user resolution failed');
-            }
-          }
-        })(),
-        (async () => {
-          if (uniqueTaskIds.size > 0) {
-            try {
-              const tasksResult = await taskServiceClient.getTasksBatch(Array.from(uniqueTaskIds));
-              (tasksResult?.tasks || []).forEach((t: any) => {
-                const taskId = t._id || t.id;
-                taskTitleCache.set(taskId, t.title);
-                const assigneeUid = t.assigneeUid || t.assigneeId;
-                if (assigneeUid) {
-                  taskAssigneeCache.set(taskId, assigneeUid);
-                  uniqueUids.add(assigneeUid);
-                }
-              });
-            } catch (err) {
-              logger.warn('Batch task resolution failed');
-            }
-          }
-        })(),
-      ]);
-
-      // Re-resolve users for any assigneeUids discovered from tasks
-      if (uniqueUids.size > 0) {
+      // 1. First, batch fetch task titles and discover assignee UIDs/IDs
+      if (uniqueTaskIds.size > 0) {
         try {
-          const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
-          (usersResult?.profiles || []).forEach((u: any) => {
-            if (!userCache.has(u.uid)) {
-              userCache.set(u.uid, { userId: u.uid, name: u.name });
+          const tasksResult = await taskServiceClient.getTasksBatch(Array.from(uniqueTaskIds));
+          (tasksResult?.tasks || []).forEach((t: any) => {
+            const taskId = t._id || t.id;
+            taskTitleCache.set(taskId, t.title);
+            const assigneeUid = t.assigneeUid || t.assigneeId;
+            if (assigneeUid) {
+              taskAssigneeCache.set(taskId, assigneeUid);
+              uniqueUids.add(assigneeUid);
             }
           });
         } catch (err) {
-          logger.warn('Batch re-resolution of users failed');
+          logger.warn('Batch task resolution failed');
         }
+      }
+
+      // 2. Batch resolve all users (original + discovered assignees)
+      if (uniqueUids.size > 0) {
+        const firebaseUids: string[] = [];
+        const profileObjectIds: string[] = [];
+        uniqueUids.forEach((id) => {
+          if (!id || id === 'pending_assignment') return;
+          if (/^[0-9a-fA-F]{24}$/.test(id)) {
+            profileObjectIds.push(id);
+          } else {
+            firebaseUids.push(id);
+          }
+        });
+
+        await Promise.all([
+          (async () => {
+            if (firebaseUids.length > 0) {
+              try {
+                const usersResult = await userServiceClient.getProfilesBatchByUids(firebaseUids);
+                (usersResult?.profiles || []).forEach((u: any) => {
+                  const resolved = { userId: u.uid, name: u.name };
+                  if (u.uid) userCache.set(u.uid, resolved);
+                  if (u._id) userCache.set(String(u._id), resolved);
+                  if (u.id) userCache.set(String(u.id), resolved);
+                });
+              } catch (err) {
+                logger.warn('Batch user resolution by Firebase UIDs failed');
+              }
+            }
+          })(),
+          (async () => {
+            if (profileObjectIds.length > 0) {
+              try {
+                const profilesResult = await userServiceClient.getProfilesBatch(profileObjectIds);
+                (profilesResult?.profiles || []).forEach((u: any) => {
+                  const resolved = { userId: u.uid, name: u.name };
+                  if (u.uid) userCache.set(u.uid, resolved);
+                  if (u._id) userCache.set(String(u._id), resolved);
+                  if (u.id) userCache.set(String(u.id), resolved);
+                });
+              } catch (err) {
+                logger.warn('Batch user resolution by Profile ObjectIds failed');
+              }
+            }
+          })(),
+        ]);
       }
 
       const resolveUser = async (uid?: string): Promise<{ userId?: string; name?: string }> => {
         if (!uid || uid === 'pending_assignment') return {};
         if (userCache.has(uid)) return userCache.get(uid) || {};
         try {
-          const userResult = await userServiceClient.getUser(uid);
-          const exact = userResult?.data || userResult;
-          const resolved = {
-            userId: exact?.uid || exact?.userId || exact?._id,
-            name: exact?.name || [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') || undefined,
-          };
-          userCache.set(uid, resolved);
-          return resolved;
+          if (/^[0-9a-fA-F]{24}$/.test(uid)) {
+            const profilesResult = await userServiceClient.getProfilesBatch([uid]);
+            const exact = (profilesResult?.profiles || [])[0];
+            if (exact) {
+              const resolved = {
+                userId: exact.uid || exact._id || exact.id,
+                name: exact.name || undefined,
+              };
+              userCache.set(uid, resolved);
+              return resolved;
+            }
+          } else {
+            const userResult = await userServiceClient.getUser(uid);
+            const exact = userResult?.data || userResult;
+            const resolved = {
+              userId: exact?.uid || exact?.userId || exact?._id,
+              name: exact?.name || [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') || undefined,
+            };
+            userCache.set(uid, resolved);
+            return resolved;
+          }
         } catch {
           logger.warn(`Failed to resolve uid ${uid}`);
         }

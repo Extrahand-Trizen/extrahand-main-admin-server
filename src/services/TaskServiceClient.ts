@@ -189,6 +189,18 @@ export class TaskServiceClient {
     return response.data;
   }
 
+  async unassignHelper(params: {
+    taskId: string;
+    escrowId?: string;
+  }, adminUserId?: string): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (adminUserId) {
+      headers['X-User-Id'] = adminUserId;
+    }
+    const response = await this.client.post('/api/v1/admin/assignments/unassign', params, { headers });
+    return response.data;
+  }
+
   /**
    * Directly assign a helper to a task (fallback).
    */

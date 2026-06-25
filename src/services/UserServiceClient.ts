@@ -51,8 +51,21 @@ export class UserServiceClient {
    * Get user by ID
    */
   async getUser(userId: string, adminUserId?: string): Promise<any> {
+    let targetUid = userId;
+    if (/^[0-9a-fA-F]{24}$/.test(userId)) {
+      try {
+        const profilesResult = await this.getProfilesBatch([userId]);
+        const profile = (profilesResult?.profiles || [])[0];
+        if (profile?.uid) {
+          targetUid = profile.uid;
+        }
+      } catch (err) {
+        logger.warn(`Failed to resolve profile ID ${userId} to firebase UID`, err);
+      }
+    }
+
     const response = await this.client.get(
-      `/api/v1/users/${this.encodeUserPathSegment(userId)}`,
+      `/api/v1/users/${this.encodeUserPathSegment(targetUid)}`,
       {
         headers: adminUserId ? { 'X-User-Id': adminUserId } : {},
       },
