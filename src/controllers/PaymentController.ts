@@ -103,33 +103,30 @@ export class PaymentController {
       const rawTransactions = data.data ?? data.transactions ?? [];
       const userCache = new Map<string, { userId?: string; name?: string }>();
       const taskTitleCache = new Map<string, string>();
+      const taskAssigneeCache = new Map<string, string>();
 
-      // Optimization: Extract all unique IDs to fetch in batch
+      // Collect all unique UIDs (customer + helper — payment service already resolved helper from payout)
       const uniqueUids = new Set<string>();
       const uniqueTaskIds = new Set<string>();
 
       rawTransactions.forEach((row: any) => {
         const posterUid = row.posterUid || row.CustomerUid;
         if (posterUid) uniqueUids.add(posterUid);
-        if (row.performerUid) uniqueUids.add(row.performerUid);
+        if (row.performerUid && row.performerUid !== 'pending_assignment') uniqueUids.add(row.performerUid);
         if (row.taskId) uniqueTaskIds.add(row.taskId);
       });
 
-      // Fetch in batch to avoid N+1 requests and slow individual stats lookups
+      // Batch fetch users and task titles
       await Promise.all([
         (async () => {
           if (uniqueUids.size > 0) {
             try {
               const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
-              const users = usersResult?.profiles || [];
-              users.forEach((u: any) => {
-                userCache.set(u.uid, {
-                  userId: u.uid,
-                  name: u.name,
-                });
+              (usersResult?.profiles || []).forEach((u: any) => {
+                userCache.set(u.uid, { userId: u.uid, name: u.name });
               });
             } catch (err) {
-              logger.warn('Batch user resolution failed, falling back to individual lookups');
+              logger.warn('Batch user resolution failed');
             }
           }
         })(),
@@ -137,100 +134,105 @@ export class PaymentController {
           if (uniqueTaskIds.size > 0) {
             try {
               const tasksResult = await taskServiceClient.getTasksBatch(Array.from(uniqueTaskIds));
-              const tasks = tasksResult?.tasks || [];
-              tasks.forEach((t: any) => {
-                taskTitleCache.set(t._id || t.id, t.title);
+              (tasksResult?.tasks || []).forEach((t: any) => {
+                const taskId = t._id || t.id;
+                taskTitleCache.set(taskId, t.title);
+                const assigneeUid = t.assigneeUid || t.assigneeId;
+                if (assigneeUid) {
+                  taskAssigneeCache.set(taskId, assigneeUid);
+                  uniqueUids.add(assigneeUid);
+                }
               });
             } catch (err) {
-              logger.warn('Batch task resolution failed, falling back to individual lookups');
+              logger.warn('Batch task resolution failed');
             }
           }
         })(),
       ]);
 
-      const resolveUser = async (
-        uid?: string
-      ): Promise<{ userId?: string; name?: string }> => {
-        if (!uid) return {};
-        if (userCache.has(uid)) {
-          return userCache.get(uid) || {};
-        }
+      // Re-resolve users for any assigneeUids discovered from tasks
+      if (uniqueUids.size > 0) {
         try {
-          // Individual fallback if not in batch
+          const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
+          (usersResult?.profiles || []).forEach((u: any) => {
+            if (!userCache.has(u.uid)) {
+              userCache.set(u.uid, { userId: u.uid, name: u.name });
+            }
+          });
+        } catch (err) {
+          logger.warn('Batch re-resolution of users failed');
+        }
+      }
+
+      const resolveUser = async (uid?: string): Promise<{ userId?: string; name?: string }> => {
+        if (!uid || uid === 'pending_assignment') return {};
+        if (userCache.has(uid)) return userCache.get(uid) || {};
+        try {
           const userResult = await userServiceClient.getUser(uid);
           const exact = userResult?.data || userResult;
           const resolved = {
             userId: exact?.uid || exact?.userId || exact?._id,
-            name:
-              exact?.name ||
-              [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') ||
-              undefined,
+            name: exact?.name || [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') || undefined,
           };
           userCache.set(uid, resolved);
           return resolved;
-        } catch (error) {
-          logger.warn(`Failed to resolve uid ${uid} to user details`);
+        } catch {
+          logger.warn(`Failed to resolve uid ${uid}`);
         }
         return {};
       };
 
       const resolveTaskTitle = async (taskId?: string): Promise<string | undefined> => {
         if (!taskId) return undefined;
-        if (taskTitleCache.has(taskId)) {
-          return taskTitleCache.get(taskId);
-        }
+        if (taskTitleCache.has(taskId)) return taskTitleCache.get(taskId);
         try {
-          // Individual fallback if not in batch
           const taskResult = await taskServiceClient.getTask(taskId);
-          const taskData = taskResult?.data || taskResult;
-          const title = taskData?.title as string | undefined;
-          if (title) {
-            taskTitleCache.set(taskId, title);
-            return title;
-          }
-        } catch (error) {
-          logger.warn(`Failed to resolve task title for taskId ${taskId}`);
+          const title = (taskResult?.data || taskResult)?.title as string | undefined;
+          if (title) { taskTitleCache.set(taskId, title); return title; }
+        } catch {
+          logger.warn(`Failed to resolve task title for ${taskId}`);
         }
         return undefined;
       };
 
-      let transactions = await Promise.all(
+      const transactions = await Promise.all(
         rawTransactions.map(async (row: any) => {
           const posterUid = row.posterUid || row.CustomerUid;
+          // Try payment service performer first, then fall back to task's assigneeUid for Book Now
+          const performerUid = row.performerUid !== 'pending_assignment'
+            ? row.performerUid
+            : taskAssigneeCache.get(row.taskId) || undefined;
+
           const [customer, helper, taskTitle] = await Promise.all([
             resolveUser(posterUid),
-            resolveUser(row.performerUid),
+            resolveUser(performerUid),
             resolveTaskTitle(row.taskId),
           ]);
 
           const customerName = (customer.name || posterUid || '').toString();
-          // Mark "Allam Test" as team tests by default, OR use existing teamTest flag
           const isTeamTestByName = customerName.trim().toLowerCase() === 'allam test';
           const teamTestFlag = isTeamTestByName || (typeof row.teamTest === 'boolean' ? row.teamTest : false);
 
           return {
             ...row,
             teamTest: teamTestFlag,
-            posterUid: posterUid,
+            posterUid,
+            payoutAmount: row.payoutAmount ?? null,
+            performerUid: performerUid || 'pending_assignment',
             links: {
               customerUserId: customer.userId,
-              helperUserId: helper.userId,
+              helperUserId: helper.userId || performerUid,
               taskId: row.taskId,
               customerName: customerName || posterUid,
               taskTitle: taskTitle || row.taskId,
-              helperName: helper.name || row.performerUid,
+              helperName: helper.name || (performerUid ? performerUid : 'Pending Assignment'),
             },
           };
         })
       );
 
       const total = data.pagination?.total ?? data.total ?? transactions.length;
-
-      res.json({
-        success: true,
-        data: transactions,
-        total: total,
-      });
+      res.json({ success: true, data: transactions, total });
     } catch (error: any) {
       logger.error('List transactions error:', error);
       res.status(getClientSafeStatus(error)).json({
