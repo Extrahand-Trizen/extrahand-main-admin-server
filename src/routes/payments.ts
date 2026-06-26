@@ -19,6 +19,12 @@ router.get(
   PaymentController.listTransactions
 );
 
+router.post(
+  '/transactions/enrich',
+  requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
+  PaymentController.enrichTransactionsBatch
+);
+
 router.patch(
   '/transactions/:id/team-test',
   requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
@@ -29,6 +35,12 @@ router.get(
   '/payouts',
   requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
   PaymentController.listPayouts
+);
+
+router.post(
+  '/payouts/enrich',
+  requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
+  PaymentController.enrichPayoutsBatch
 );
 
 router.patch(
@@ -55,6 +67,12 @@ router.get(
   PaymentController.listRefunds
 );
 
+router.post(
+  '/refunds/enrich',
+  requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
+  PaymentController.enrichRefundsBatch
+);
+
 router.patch(
   '/refunds/:id/team-test',
   requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
@@ -65,6 +83,12 @@ router.get(
   '/ledger',
   requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
   PaymentController.listLedger
+);
+
+router.post(
+  '/ledger/enrich',
+  requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
+  PaymentController.enrichLedgerBatch
 );
 
 router.delete(

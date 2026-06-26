@@ -2,6 +2,9 @@ import axios, { AxiosInstance } from 'axios';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
+const taskCache = new Map<string, { data: any; expiry: number }>();
+const TASK_CACHE_TTL_MS = 60_000;
+
 export class TaskServiceClient {
   private client: AxiosInstance;
   private readonly serviceUserId = 'main-admin-service';
@@ -49,12 +52,43 @@ export class TaskServiceClient {
    * Get task by ID
    */
   async getTask(taskId: string): Promise<any> {
+    const cached = taskCache.get(taskId);
+    if (cached && cached.expiry > Date.now()) return cached.data;
     const response = await this.client.get(`/api/v1/tasks/${taskId}`);
+    taskCache.set(taskId, { data: response.data, expiry: Date.now() + TASK_CACHE_TTL_MS });
     return response.data;
   }
 
   async getTasksBatch(taskIds: string[]): Promise<any> {
+    if (!taskIds.length) return { tasks: [] };
+    const key = `batch:${taskIds.sort().join(',')}`;
+    const cached = taskCache.get(key);
+    if (cached && cached.expiry > Date.now()) return cached.data;
+    
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+        const objectIds = taskIds.map((id: string) => {
+          try { return new mongoose.Types.ObjectId(id); } catch { return null; }
+        }).filter(Boolean);
+        
+        const tasks = await mongoose.connection.db.collection('tasks').find({
+          $or: [
+            { _id: { $in: objectIds } },
+            { id: { $in: taskIds } }
+          ]
+        }).project({ _id: 1, id: 1, title: 1, assigneeUid: 1, assigneeId: 1 }).toArray();
+        
+        const data = { tasks };
+        taskCache.set(key, { data, expiry: Date.now() + TASK_CACHE_TTL_MS });
+        return data;
+      }
+    } catch (err) {
+      logger.warn('Direct MongoDB fetch failed for tasks batch, falling back to HTTP:', err);
+    }
+
     const response = await this.client.post('/api/v1/tasks/batch', { taskIds });
+    taskCache.set(key, { data: response.data, expiry: Date.now() + TASK_CACHE_TTL_MS });
     return response.data;
   }
   

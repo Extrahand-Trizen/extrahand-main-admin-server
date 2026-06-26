@@ -2,6 +2,9 @@ import axios, { AxiosInstance } from 'axios';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
+const profileCache = new Map<string, { data: any; expiry: number }>();
+const PROFILE_CACHE_TTL_MS = 60_000;
+
 export class UserServiceClient {
   private client: AxiosInstance;
 
@@ -142,12 +145,61 @@ export class UserServiceClient {
    * Get multiple profiles by ObjectId for enrichment
    */
   async getProfilesBatch(profileIds: string[]): Promise<any> {
+    if (!profileIds.length) return { profiles: [] };
+    const key = `batch:${profileIds.sort().join(',')}`;
+    const cached = profileCache.get(key);
+    if (cached && cached.expiry > Date.now()) return cached.data;
+    
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+        const objectIds = profileIds.map((id: string) => {
+          try { return new mongoose.Types.ObjectId(id); } catch { return null; }
+        }).filter(Boolean);
+        
+        const profiles = await mongoose.connection.db.collection('profiles').find({
+          $or: [
+            { _id: { $in: objectIds } },
+            { id: { $in: profileIds } }
+          ]
+        }).project({ _id: 1, id: 1, uid: 1, name: 1 }).toArray();
+        
+        const data = { profiles };
+        profileCache.set(key, { data, expiry: Date.now() + PROFILE_CACHE_TTL_MS });
+        return data;
+      }
+    } catch (err) {
+      logger.warn('Direct MongoDB fetch failed for profiles batch, falling back to HTTP:', err);
+    }
+
     const response = await this.client.post('/api/v1/profiles/batch', { profileIds });
+    profileCache.set(key, { data: response.data, expiry: Date.now() + PROFILE_CACHE_TTL_MS });
     return response.data;
   }
 
   async getProfilesBatchByUids(uids: string[]): Promise<any> {
+    if (!uids.length) return { profiles: [] };
+    const key = `uids:${uids.sort().join(',')}`;
+    const cached = profileCache.get(key);
+    if (cached && cached.expiry > Date.now()) return cached.data;
+
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+        const profiles = await mongoose.connection.db.collection('profiles').find({
+          uid: { $in: uids }
+        }).project({ _id: 1, id: 1, uid: 1, name: 1 }).toArray();
+        
+        const data = { profiles };
+        profileCache.set(key, { data, expiry: Date.now() + PROFILE_CACHE_TTL_MS });
+        return data;
+      }
+    } catch (err) {
+      logger.warn('Direct MongoDB fetch failed for profiles uids batch, falling back to HTTP:', err);
+    }
+
     const response = await this.client.post('/api/v1/profiles/batch/uids', { uids });
+    profileCache.set(key, { data: response.data, expiry: Date.now() + PROFILE_CACHE_TTL_MS });
     return response.data;
   }
   

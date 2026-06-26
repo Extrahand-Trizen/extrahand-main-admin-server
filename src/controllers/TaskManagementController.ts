@@ -23,6 +23,7 @@ import {
   taskMatchesAssigneeFilter,
 } from '../services/TaskAssignmentService';
 import { TaskAssignment } from '../models/TaskAssignment';
+import { userServiceClient } from '../services/UserServiceClient';
 
 type UpstreamPagination = {
   page?: number;
@@ -147,6 +148,28 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
         : null,
     };
   });
+}
+
+async function enrichTasksWithAssigneeName(tasks: any[]): Promise<any[]> {
+  const assigneeIds = Array.from(new Set(
+    tasks.map((t) => t.assigneeId).filter(Boolean)
+  ));
+  if (assigneeIds.length === 0) return tasks;
+
+  try {
+    const result = await userServiceClient.getProfilesBatch(assigneeIds);
+    const profiles = Array.isArray(result?.profiles) ? result.profiles : [];
+    const profileMap = new Map(
+      profiles.map((p: any) => [String(p._id || p.id), p.name || 'Unknown'])
+    );
+    return tasks.map((task) => ({
+      ...task,
+      assigneeName: task.assigneeId ? (profileMap.get(String(task.assigneeId)) ?? null) : null,
+    }));
+  } catch (error) {
+    logger.warn('Failed to enrich tasks with assignee name', error);
+    return tasks;
+  }
 }
 
 async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise<any[]> {
@@ -278,6 +301,7 @@ export class TaskManagementController {
         const allTasks = await fetchTasksForLocalFiltering(fetchParams);
         let enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
         enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
+        enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
 
         // Apply overdue filter: open tasks whose scheduledDate has passed (and not flexible)
         if (isOverdueFilter) {
@@ -338,6 +362,7 @@ export class TaskManagementController {
         : [];
       let enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
       enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
+      enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
 
       // When filtering by 'open', exclude tasks whose deadline has already passed
       // (overdue tasks should only appear when 'overdue' filter is selected)
@@ -415,6 +440,7 @@ export class TaskManagementController {
       const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
       let [enrichedTask] = await enrichTasksWithTaskCallStatus([normalizedTask]);
       [enrichedTask] = await enrichTasksWithAssignedTo([enrichedTask]);
+      [enrichedTask] = await enrichTasksWithAssigneeName([enrichedTask]);
       
       res.json({
         success: true,

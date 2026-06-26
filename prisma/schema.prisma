@@ -1,0 +1,564 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// CORE PAYMENT TABLES (Cannot Combine)
+// ============================================================================
+
+// Transaction - Canonical pay-in record
+model Transaction {
+  id                String   @id @default(uuid())
+  userId            String
+  taskId            String?
+  applicationId     String?
+  razorpayOrderId   String   @unique
+  razorpayPaymentId String?  @unique
+  amount            Decimal  @db.Decimal(12, 2) // Amount in rupees
+  currency          String   @default("INR")
+  status            String // created, authorized, captured, failed
+  paymentMethod     String?
+  metadata          Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId])
+  @@index([taskId])
+  @@index([status, createdAt])
+}
+
+// Escrow - Holds funds when offer is accepted
+model Escrow {
+  id                String    @id @default(uuid())
+  escrowId          String    @unique
+  transactionId     String?
+  razorpayOrderId   String    @unique
+  taskId            String
+  // NEW: category used for fee/tax resolution
+  taskCategory      String? // e.g. "cleaning", "legal"; nullable for old escrows
+  applicationId     String?
+  posterUid         String
+  performerUid      String?
+  bookingOrderId    String?
+  amount            Decimal   @db.Decimal(12, 2) // Amount in paise
+  currency          String    @default("INR")
+  amountInRupees    Decimal   @db.Decimal(12, 2) // Amount in rupees (task + platform fee + GST)
+  taskAmount        Decimal?  @db.Decimal(12, 2) // Base task amount in rupees (excluding platform fee and GST) - for refund calculation
+  status            String // pending, held, released, refunded, cancelled
+  razorpayPaymentId String?
+  paymentStatus     String? // pending, authorized, captured, failed
+  autoReleaseDate   DateTime?
+  heldAt            DateTime?
+  releasedAt        DateTime?
+  refundedAt        DateTime?
+  errorMessage      String?
+  errorCode         String?
+
+  // JSONB fields for flexible data (migrated from MongoDB)
+  razorpayOrderData   Json? // Sanitized Razorpay order response
+  razorpayPaymentData Json? // Sanitized Razorpay payment response
+  metadata            Json? // Additional flexible metadata
+
+  // NEW: Snapshot of applied fees at creation time to preserve historical pricing
+  appliedGstPercent         Decimal? @db.Decimal(5, 4)
+  appliedPlatformFeePercent Decimal? @db.Decimal(5, 4)
+  appliedRazorpayGstPercent Decimal? @db.Decimal(5, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  ledger   Ledger[]
+  refunds  Refund[]
+  payouts  Payout[]
+  disputes Dispute[]
+
+  @@index([taskId, status])
+  @@index([bookingOrderId])
+  @@index([posterUid, status])
+  @@index([posterUid, status, createdAt(sort: Desc)])
+  @@index([performerUid, status])
+  @@index([performerUid, status, createdAt(sort: Desc)])
+  @@index([status, autoReleaseDate])
+  @@index([createdAt])
+}
+
+// Ledger - Immutable transaction history
+// Also handles fee tracking (replaces separate Fee table)
+// Fee details (type, percentage, baseAmount) stored in metadata JSON
+model Ledger {
+  id                String   @id @default(uuid())
+  transactionId     String   @unique
+  userId            String?
+  taskId            String?
+  escrowId          String?
+  payoutId          String?
+  refundId          String?
+  paymentTransactionId String?
+  razorpayPaymentId String?
+  type              String // escrow, payment, refund, payout, razorpay_fee, platform_commission, gst, tds, cancellation_fee, platform_fee
+  direction         String? // credit, debit
+  amount            Decimal  @db.Decimal(12, 2)
+  balanceBefore     Decimal  @db.Decimal(12, 2)
+  balanceAfter      Decimal  @db.Decimal(12, 2)
+  description       String?
+  metadata          Json? // For fees: { type, percentage, baseAmount, description }
+  createdAt         DateTime @default(now())
+
+  // Relations
+  escrow Escrow? @relation(fields: [escrowId], references: [id], onDelete: SetNull)
+  payout Payout? @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+  refund Refund? @relation(fields: [refundId], references: [id], onDelete: SetNull)
+
+  @@unique([razorpayPaymentId, type])
+  @@index([escrowId])
+  @@index([userId])
+  @@index([taskId])
+  @@index([type])
+  @@index([payoutId])
+  @@index([refundId])
+  @@index([createdAt])
+}
+
+// Refund - Refund tracking
+model Refund {
+  id               String    @id @default(uuid())
+  refundId         String    @unique
+  transactionId    String?
+  taskId           String?
+  escrowId         String?
+  paymentId        String
+  razorpayRefundId String?   @unique
+  cancellationFee  Decimal?  @db.Decimal(12, 2)
+  refundAmount     Decimal   @db.Decimal(12, 2) // Amount after cancellation fee
+  // Cancellation fee distribution (merged from CancellationFeeDistribution table)
+  toOtherParty     Decimal?  @db.Decimal(12, 2) // Compensation to other party
+  toPlatform       Decimal?  @db.Decimal(12, 2) // Platform fee
+  reason           String?
+  cancelledBy      String? // poster or performer
+  status           String // pending, processing, completed, failed
+  errorMessage     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  completedAt      DateTime?
+
+  // Relations
+  escrow Escrow? @relation(fields: [escrowId], references: [id], onDelete: SetNull)
+  ledger Ledger[]
+
+  @@index([escrowId])
+  @@index([transactionId])
+  @@index([taskId])
+  @@index([paymentId])
+  @@index([status])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([createdAt])
+}
+
+// Payout - Payout tracking
+model Payout {
+  id                 String    @id @default(uuid())
+  payoutId           String    @unique
+  transactionId      String?
+  taskId             String?
+  escrowId           String?
+  performerUid       String
+  amount             Decimal   @db.Decimal(12, 2) // Gross amount
+  platformCommission Decimal   @db.Decimal(12, 2)
+  gstOnCommission    Decimal   @db.Decimal(12, 2)
+  tds                Decimal?  @db.Decimal(12, 2)
+  netAmount          Decimal   @db.Decimal(12, 2) // Amount after all fees
+  bankTransferId     String? // Mock bank transfer ID
+  status             String // pending, processing, completed, failed
+  source             String? // task_completion, escrow_release
+  type               String // release, cancellation_compensation, task_completion
+  description        String?
+  errorMessage       String?
+  metadata           Json? // penalty deductions, gross vs net, etc.
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  completedAt        DateTime?
+
+  // Relations
+  escrow Escrow? @relation(fields: [escrowId], references: [id], onDelete: SetNull)
+  ledger Ledger[]
+
+  @@index([escrowId])
+  @@index([transactionId])
+  @@index([taskId])
+  @@index([performerUid])
+  @@index([performerUid, createdAt(sort: Desc)])
+  @@index([performerUid, status, createdAt(sort: Desc)])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Tasker cancellation penalty — recovered from future RazorpayX payouts
+model PerformerCancellationPenalty {
+  id              String    @id @default(uuid())
+  penaltyId       String    @unique
+  performerUid    String
+  taskId          String
+  escrowId        String?
+  amount          Decimal   @db.Decimal(12, 2)
+  remainingAmount Decimal   @db.Decimal(12, 2)
+  status          String // pending, applied
+  feePercentage   Decimal?  @db.Decimal(8, 6)
+  cancelledAt     DateTime
+  reason          String?
+  taskTitle       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  appliedAt       DateTime?
+
+  @@index([performerUid, status])
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+// Dispute - Dispute management
+model Dispute {
+  id           String    @id @default(uuid())
+  disputeId    String    @unique
+  escrowId     String
+  raisedBy     String // UID of user who raised dispute
+  raisedByType String // poster or performer
+  reason       String
+  evidence     Json? // Array of evidence URLs/objects
+  status       String // open, under_review, resolved, closed
+  resolution   String? // refund or payout
+  resolvedBy   String? // Admin UID
+  resolvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations
+  escrow Escrow @relation(fields: [escrowId], references: [id], onDelete: Cascade)
+
+  @@index([escrowId])
+  @@index([raisedBy])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Reconciliation - Reconciliation records
+model Reconciliation {
+  id                       String    @id @default(uuid())
+  reconciliationId         String    @unique
+  date                     DateTime
+  razorpaySettlementAmount Decimal   @db.Decimal(12, 2)
+  internalTotalAmount      Decimal   @db.Decimal(12, 2)
+  difference               Decimal   @db.Decimal(12, 2)
+  status                   String // matched, mismatch, resolved
+  mismatches               Json? // Array of mismatch details
+  resolvedBy               String?
+  resolvedAt               DateTime?
+  notes                    String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([date])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// USER FINANCIAL DATA (Payment Service Owns)
+// ============================================================================
+
+// BankAccount - Personal bank accounts for payouts (NOT business accounts)
+// Business bank accounts are stored in User Service for business verification
+// This table is for performer payouts only
+model BankAccount {
+  id                String    @id @default(uuid())
+  userId            String // User UID (reference only, no FK - user data in User Service)
+  accountNumber     String // Masked display only (XXXX1234) for tasker-facing APIs
+  ifscCode          String
+  bankName          String
+  accountHolderName String // Masked display for tasker-facing APIs
+  /** AES-256-GCM ciphertext (base64 envelope). Full number for admin/ops decrypt only. */
+  accountNumberEncrypted    String? @db.Text
+  accountHolderNameEncrypted String? @db.Text
+  accountNumberLast4        String?
+  encryptionKeyVersion      String? @default("v1")
+  isVerified        Boolean   @default(false)
+  isDefault         Boolean   @default(false)
+  verifiedAt        DateTime?
+  verificationRef   String? // RazorpayX contactId + fundAccountId JSON
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Duplicates are allowed intentionally to support repeated account onboarding entries.
+  // The app layer can still apply business checks if needed.
+  @@index([userId, accountNumber, ifscCode])
+  @@index([userId, accountNumberLast4])
+  @@index([userId])
+  @@index([userId, isDefault])
+}
+
+// UserPaymentProfile - Combined transaction summary + payment preferences
+// Optimized to reduce DB queries (1 query instead of 2)
+// Owned by Payment Service (financial data)
+model UserPaymentProfile {
+  id     String @id @default(uuid())
+  userId String @unique // User UID (reference only, no FK)
+
+  // Transaction Summary (cached for fast access)
+  totalEarnings     Decimal @default(0) @db.Decimal(12, 2)
+  fromPayouts       Decimal @default(0) @db.Decimal(12, 2)
+  fromCompensation  Decimal @default(0) @db.Decimal(12, 2)
+  payoutCount       Int     @default(0)
+  compensationCount Int     @default(0)
+  totalPayments     Decimal @default(0) @db.Decimal(12, 2)
+  paymentCount      Int     @default(0)
+  totalRefunds      Decimal @default(0) @db.Decimal(12, 2)
+  refundCount       Int     @default(0)
+  totalFees         Decimal @default(0) @db.Decimal(12, 2)
+
+  // Stats (cached for dashboard)
+  averagePayout   Decimal?  @db.Decimal(12, 2)
+  largestPayout   Decimal?  @db.Decimal(12, 2)
+  smallestPayout  Decimal?  @db.Decimal(12, 2)
+  lastPayoutDate  DateTime?
+  lastPaymentDate DateTime?
+
+  // Payment Preferences
+  defaultBankAccountId String? // Reference to BankAccount.id
+  currency             String  @default("INR") // Kept for future multi-currency support
+
+  lastUpdatedAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ExtraCoin wallet balance per performer
+model ExtraCoinWallet {
+  id                  String   @id @default(uuid())
+  userId              String
+  walletRole          String   @default("tasker") // poster | tasker (legacy: customer)
+  balanceCoins        Decimal  @default(0) @db.Decimal(12, 2)
+  balanceRupees       Decimal  @default(0) @db.Decimal(12, 2)
+  lifetimeEarnedCoins Decimal  @default(0) @db.Decimal(12, 2)
+  lifetimeUsedCoins   Decimal  @default(0) @db.Decimal(12, 2)
+  lastUpdatedAt       DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([userId, walletRole])
+  @@index([userId])
+  @@index([userId, walletRole])
+}
+
+// ExtraCoin ledger for earning, redeeming, and expiry events
+model ExtraCoinTransaction {
+  id              String    @id @default(uuid())
+  transactionId   String    @unique
+  userId          String
+  walletRole      String    @default("tasker") // poster | tasker (legacy: customer)
+  type            String // earned, redeemed, expired
+  status          String    @default("completed") // completed, reversed
+  coins           Decimal   @db.Decimal(12, 2)
+  rupeeValue      Decimal   @db.Decimal(12, 2)
+  remainingCoins  Decimal?  @db.Decimal(12, 2)
+  remainingRupees Decimal?  @db.Decimal(12, 2)
+  sourcePayoutId  String?
+  taskId          String?
+  expiresAt       DateTime?
+  idempotencyKey  String?   @unique
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, walletRole, type])
+  @@index([userId, expiresAt])
+  @@index([userId, walletRole, expiresAt])
+  @@index([walletRole, createdAt])
+  @@index([sourcePayoutId])
+  @@index([taskId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// SYSTEM TABLES (Optimized & Combined)
+// ============================================================================
+
+// AuditLog - Enhanced audit trail (includes webhook events)
+// Combines AuditLog + WebhookEventLog for unified event tracking
+model AuditLog {
+  id         String  @id @default(uuid())
+  eventId    String? @unique // For webhooks (Razorpay event ID)
+  entityType String // escrow, refund, payout, dispute, webhook
+  entityId   String? // Entity ID (nullable for webhook events)
+  action     String // created, updated, deleted, status_changed, webhook_received
+  oldValue   Json?
+  newValue   Json?
+  actorId    String? // UID of user/admin/system/razorpay
+  actorType  String? // user, admin, system, razorpay
+  ipAddress  String?
+  userAgent  String?
+
+  // Webhook-specific fields (nullable for non-webhook events)
+  eventType    String? // payment.captured, payment.failed, refund.processed (for webhooks)
+  source       String? // razorpay, internal (for webhooks)
+  payload      Json? // Full webhook payload or event data
+  processed    Boolean   @default(false) // For webhook processing status
+  processedAt  DateTime?
+  retryCount   Int       @default(0) // For webhook retries
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([action])
+  @@index([eventType, processed]) // For webhook queries
+  @@index([createdAt])
+}
+
+// JobQueue - Generic queue for all async jobs
+// Combines PaymentRetryQueue + other job queues
+// Handles: payment retries, payout retries, refund retries, reconciliation jobs, auto-release jobs
+model JobQueue {
+  id           String    @id @default(uuid())
+  jobId        String    @unique
+  jobType      String // payment_retry, payout_retry, refund_retry, reconciliation, auto_release, webhook_retry
+  entityType   String? // escrow, payout, refund, webhook
+  entityId     String? // escrowId, payoutId, refundId, etc.
+  payload      Json? // Job-specific data
+  attemptCount Int       @default(0)
+  maxAttempts  Int       @default(3)
+  nextRetryAt  DateTime
+  lastError    String?
+  status       String // pending, processing, completed, failed, cancelled
+  priority     Int       @default(0) // Higher = more priority (0 = normal, 10 = high)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  completedAt  DateTime?
+
+  @@index([status, nextRetryAt]) // For job scheduler queries
+  @@index([jobType, status])
+  @@index([entityType, entityId])
+  @@index([priority, status]) // For priority-based processing
+}
+
+// SystemConfig - System-wide configuration and settings
+// Stores: fee structures, system settings, feature flags
+// FeeStructureHistory stored as JSONB array in configValue
+model SystemConfig {
+  id          String   @id @default(uuid())
+  configKey   String   @unique
+  configValue Json // Flexible JSON value (can be object, array, string, number)
+  description String?
+  category    String? // fees, settings, feature_flags, limits
+  updatedBy   String? // Admin UID
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([configKey])
+  @@index([category])
+}
+
+// Idempotency keys for Razorpay order creation (pay-in only)
+model PaymentOrderIdempotency {
+  id              String   @id @default(uuid())
+  idempotencyKey  String   @unique
+  razorpayOrderId String
+  orderPayload    Json
+  createdAt       DateTime @default(now())
+}
+
+enum CategoryFeeMode {
+  BOOK_NOW
+  BIDDING
+}
+
+// CategoryFeeConfig - Per-category fee overrides and optional guards
+model CategoryFeeConfig {
+  id          String          @id @default(uuid())
+  categoryKey String
+  mode        CategoryFeeMode @default(BIDDING)
+  displayName String?
+
+  // GST classification (SAC = Services Accounting Code)
+  sacCode     String?
+  sacHeading  String?
+
+  // Core knobs
+  gstPercentage            Decimal  @db.Decimal(5, 4)
+  platformFeePercentage    Decimal? @db.Decimal(5, 4)
+  razorpayFeeGstPercentage Decimal? @db.Decimal(5, 4)
+
+  // Optional price guards
+  minPrice Decimal? @db.Decimal(12, 2)
+  maxPrice Decimal? @db.Decimal(12, 2)
+
+  // Optional scheduling / audit
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  updatedBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([categoryKey, mode])
+  @@index([categoryKey])
+  @@index([mode])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+// AdminUser - Minimal admin auth for internal portal
+model AdminUser {
+  id           String    @id @default(uuid())
+  username     String?   @unique
+  email        String?   @unique
+  name         String?
+  passwordHash String?
+  role         String    @default("support") // super_admin, support, finance
+  status       String    @default("invited") // invited, active, disabled
+  invitedBy    String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([username])
+  @@index([email])
+  @@index([role, status])
+}
+
+// AdminInvite - Invite workflow for internal portal members
+model AdminInvite {
+  id        String    @id @default(uuid())
+  email     String
+  role      String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  invitedBy String
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+// ============================================================================
+// NOTES
+// ============================================================================
+
+// Fee tracking is handled by Ledger table with type='fee'
+// Fee details (type, percentage, baseAmount) are stored in Ledger.metadata JSON
+// This simplifies the schema while maintaining all fee tracking capabilities
+
+// Service Boundaries:
+// - Payment Service owns: All financial data (Escrow, Payout, Refund, BankAccount, UserPaymentProfile)
+// - User Service owns: User profiles, business bank accounts (for verification)
+// - Task Service owns: Tasks, applications, reviews
+// - Verification Service owns: Aadhaar KYC, verification records
+// - No data duplication across services (userId is reference only, not FK)
