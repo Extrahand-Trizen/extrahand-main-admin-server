@@ -258,9 +258,9 @@ export class PaymentController {
         ? await db.payout.findMany({
             where: { escrowId: { in: escrowDbIds } },
             select: { escrowId: true, netAmount: true, performerUid: true, status: true },
-          }).then((rows) => {
+          }).then((rows: { escrowId: string | null; netAmount: any; performerUid: any; status: any }[]) => {
             const m = new Map<string, any>();
-            rows.forEach((p) => { if (p.escrowId) m.set(p.escrowId, p); });
+            rows.forEach((p: { escrowId: string | null }) => { if (p.escrowId) m.set(p.escrowId, p); });
             return m;
           }).catch(() => new Map<string, any>())
         : new Map<string, any>();
