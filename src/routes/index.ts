@@ -12,6 +12,7 @@ import notificationRoutes from './notifications';
 import taskCallRoutes from './taskCalls';
 import kycReviewRoutes from './kycReviews';
 import aadhaarFollowUpRoutes from './aadhaarFollowUps';
+import payoutRoutes from './payouts';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.use(`${API_PREFIX}/notifications`, notificationRoutes);
 router.use(`${API_PREFIX}/task-calls`, taskCallRoutes);
 router.use(`${API_PREFIX}/kyc-reviews`, kycReviewRoutes);
 router.use(`${API_PREFIX}/aadhaar-followups`, aadhaarFollowUpRoutes);
+router.use(`${API_PREFIX}/payouts`, payoutRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

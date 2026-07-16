@@ -1,14 +1,14 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
 export class PaymentServiceClient {
   private client: AxiosInstance;
+  private readonly serviceUserId = 'main-admin-service';
 
   constructor() {
     this.client = axios.create({
-      // Mirror financial-admin backend default payment service port.
-      baseURL: env.PAYMENT_SERVICE_URL,
+      baseURL: env.PAYMENT_SERVICE_URL || 'http://localhost:4003',
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -17,34 +17,32 @@ export class PaymentServiceClient {
       },
     });
 
-    this.client.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        logger.error('Payment Service Response Error:', {
-          status: error.response?.status,
-          data: error.response?.data,
-          message: error.message,
-        });
+    this.client.interceptors.request.use(
+      (config: InternalAxiosRequestConfig) => {
+        config.headers = config.headers || {};
+        if (!config.headers['X-User-Id']) {
+          config.headers['X-User-Id'] = this.serviceUserId;
+        }
+        logger.debug(`Payment Service Request: ${config.method?.toUpperCase()} ${config.url}`);
+        return config;
+      },
+      (error: unknown) => {
+        logger.error('Payment Service Request Error:', error);
         return Promise.reject(error);
-      }
+      },
     );
   }
 
-  async get(path: string, params?: Record<string, any>): Promise<any> {
-    const response = await this.client.get(path, { params });
-    return response.data;
-  }
-
-  async patch(path: string, body: Record<string, any>): Promise<any> {
-    const response = await this.client.patch(path, body);
-    return response.data;
-  }
-
-  async delete(path: string): Promise<any> {
-    const response = await this.client.delete(path);
+  async listManualOpsPayoutQueue(params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    const response = await this.client.get('/api/v1/payouts/ops/manual-queue', {
+      params,
+    });
     return response.data;
   }
 }
 
 export const paymentServiceClient = new PaymentServiceClient();
-
