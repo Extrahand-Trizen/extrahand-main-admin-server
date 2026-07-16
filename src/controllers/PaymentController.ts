@@ -354,6 +354,10 @@ export class PaymentController {
       const enrichment = await enrichTransactions(rows);
       const { userCache, taskTitleCache, taskAssigneeCache = new Map() } = enrichment;
 
+      const fs = require('fs');
+      const debugLogPath = require('path').join(__dirname, '../../scratch/backend_debug.log');
+      fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] DEBUG enrichTransactionsBatch - taskTitleCache keys: ${JSON.stringify(Array.from(taskTitleCache.keys()))}\n`);
+
       const data: Record<string, any> = {};
       for (const row of rows) {
         const posterUid = row.posterUid;
@@ -364,6 +368,8 @@ export class PaymentController {
         const customer = posterUid ? (userCache.get(posterUid) || {}) : {};
         const helper = performerUid ? (userCache.get(performerUid) || {}) : {};
         const taskTitle = row.taskId ? taskTitleCache.get(row.taskId) : null;
+
+        fs.appendFileSync(debugLogPath, `[${new Date().toISOString()}] DEBUG enrichRow - taskId: ${row.taskId}, resolved taskTitle: ${taskTitle}\n`);
 
         const customerName = customer.name || null;
         const helperName = helper.name || null;
@@ -407,7 +413,9 @@ export class PaymentController {
   static async updatePayoutStatus(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const payload = await paymentServiceClient.patch(`/api/v1/dashboard/payouts/${id}/status`, req.body);
+      const environment = typeof req.query.environment === 'string' ? req.query.environment : undefined;
+      const qs = environment ? `?environment=${environment}` : '';
+      const payload = await paymentServiceClient.patch(`/api/v1/dashboard/payouts/${id}/status${qs}`, req.body);
       res.json({ success: true, data: payload });
     } catch (error: any) {
       logger.error('Update payout status error:', error);

@@ -65,7 +65,9 @@ export class InviteController {
       // Send invite email
       try {
         if (env.EMAIL_SERVICE_URL) {
-          const inviteUrl = `${env.MAIN_ADMIN_DASHBOARD_URL}/accept-invite?token=${token}&inviteId=${invite.inviteId}`;
+          const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '') || env.MAIN_ADMIN_DASHBOARD_URL;
+          const baseUrl = origin.replace(/\/$/, '');
+          const inviteUrl = `${baseUrl}/accept-invite?token=${token}&inviteId=${invite.inviteId}`;
 
           const emailServiceAuthToken = env.EMAIL_SERVICE_AUTH_TOKEN || env.SERVICE_AUTH_TOKEN;
 
@@ -212,7 +214,9 @@ export class InviteController {
       // Send email
       try {
         if (env.EMAIL_SERVICE_URL) {
-          const inviteUrl = `${env.MAIN_ADMIN_DASHBOARD_URL}/accept-invite?token=${newToken}&inviteId=${invite.inviteId}`;
+          const origin = req.get('origin') || req.get('referer')?.replace(/\/$/, '') || env.MAIN_ADMIN_DASHBOARD_URL;
+          const baseUrl = origin.replace(/\/$/, '');
+          const inviteUrl = `${baseUrl}/accept-invite?token=${newToken}&inviteId=${invite.inviteId}`;
 
           const emailServiceAuthToken = env.EMAIL_SERVICE_AUTH_TOKEN || env.SERVICE_AUTH_TOKEN;
 

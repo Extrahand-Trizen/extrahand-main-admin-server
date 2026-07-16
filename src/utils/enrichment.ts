@@ -50,10 +50,19 @@ export async function enrichEntities(
   }
 
   // Single batch query per collection — no N+1, no HTTP hops
+  const taskQuery: any = uniqueTaskIds.length > 0
+    ? {
+        $or: [
+          { _id: { $in: uniqueTaskIds.filter(isObjectId) } },
+          { id: { $in: uniqueTaskIds } },
+        ],
+      }
+    : null;
+
   const [taskDocs, uidProfiles, objIdProfiles] = await Promise.all([
-    uniqueTaskIds.length > 0
-      ? Task.find({ _id: { $in: uniqueTaskIds } })
-          .select('title assigneeUid assigneeId')
+    taskQuery
+      ? Task.find(taskQuery)
+          .select('title assigneeUid assigneeId id')
           .lean()
           .catch(() => [])
       : Promise.resolve([]),
@@ -75,11 +84,19 @@ export async function enrichEntities(
   populateUserCache(userCache, objIdProfiles);
 
   for (const t of taskDocs) {
-    if (t.title) taskTitleCache.set(String(t._id), t.title);
+    if (t.title) {
+      taskTitleCache.set(String(t._id), t.title);
+      if ((t as any).id && String((t as any).id) !== String(t._id)) {
+        taskTitleCache.set(String((t as any).id), t.title);
+      }
+    }
     if (includeTaskAssignees && taskAssigneeCache) {
       const assigneeUid = t.assigneeUid || (t.assigneeId ? String(t.assigneeId) : undefined);
       if (assigneeUid && assigneeUid !== 'pending_assignment') {
         taskAssigneeCache.set(String(t._id), assigneeUid);
+        if ((t as any).id && String((t as any).id) !== String(t._id)) {
+          taskAssigneeCache.set(String((t as any).id), assigneeUid);
+        }
       }
     }
   }

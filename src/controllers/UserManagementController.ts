@@ -82,6 +82,7 @@ export class UserManagementController {
         area: req.query.area as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
+        uids: req.query.uids as string,
       };
       
       const result = await userServiceClient.listUsers(params);

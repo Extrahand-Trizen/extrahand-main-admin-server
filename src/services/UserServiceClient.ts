@@ -93,6 +93,7 @@ export class UserServiceClient {
     createdTo?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
+    uids?: string;
   }): Promise<any> {
     const response = await this.client.get('/api/v1/users', { params });
     return response.data;
