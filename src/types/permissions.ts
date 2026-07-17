@@ -146,7 +146,9 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.USER}.${Action.VIEW}`,
     `${Resource.USER}.${Action.LIST}`,
     `${Resource.USER}.${Action.SEARCH}`,
+    `${Resource.USER}.${Action.UPDATE}`,
     `${Resource.USER_PROFILE}.${Action.VIEW}`,
+    `${Resource.USER_PROFILE}.${Action.UPDATE}`,
 
     // Tasks
     `${Resource.TASK}.${Action.VIEW}`,
