@@ -86,6 +86,8 @@ export class UserServiceClient {
     status?: string;
     role?: string;
     category?: string;
+    city?: string;
+    workArea?: string;
     area?: string;
     isAadhaarVerified?: boolean;
     isCertified?: boolean;
@@ -94,6 +96,7 @@ export class UserServiceClient {
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
     uids?: string;
+    includeSummary?: boolean;
   }): Promise<any> {
     const response = await this.client.get('/api/v1/users', { params });
     return response.data;

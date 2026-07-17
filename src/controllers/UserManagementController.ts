@@ -69,6 +69,8 @@ export class UserManagementController {
         status: req.query.status as string,
         role: req.query.role as string,
         category: req.query.category as string,
+        city: req.query.city as string,
+        workArea: req.query.workArea as string,
         isAadhaarVerified:
           typeof req.query.isAadhaarVerified === 'string'
             ? req.query.isAadhaarVerified === 'true'
@@ -80,6 +82,10 @@ export class UserManagementController {
         createdFrom: req.query.createdFrom as string,
         createdTo: req.query.createdTo as string,
         area: req.query.area as string,
+        includeSummary:
+          typeof req.query.includeSummary === 'string'
+            ? req.query.includeSummary === 'true'
+            : undefined,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
         uids: req.query.uids as string,
@@ -96,6 +102,7 @@ export class UserManagementController {
           total: Array.isArray(result.data) ? result.data.length : 0,
           pages: 1,
         },
+        summary: result.summary,
       });
     } catch (error: any) {
       logger.error('List users error:', error);
