@@ -31,9 +31,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
 
       - name: Install dependencies
+        env:
+          POSTGRESDB_URI: postgresql://build:build@127.0.0.1:5432/build
+          PAYMENT_POSTGRESDB_URI: postgresql://build:build@127.0.0.1:5432/build
         run: |
           if [ -f package-lock.json ]; then
             npm ci || {
@@ -45,6 +48,12 @@ jobs:
             echo "::warning::package-lock.json missing — using npm install"
             npm install
           fi
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          POSTGRESDB_URI: postgresql://build:build@127.0.0.1:5432/build
+          PAYMENT_POSTGRESDB_URI: postgresql://build:build@127.0.0.1:5432/build
 
       - name: Build TypeScript
         run: npm run build

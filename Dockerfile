@@ -1,23 +1,25 @@
-# Use Node.js 20 Alpine image
+# Prisma 7.x requires Node 20.19+, 22.12+, or 24+
 FROM node:20-alpine AS base
 
-# Install runtime utilities
-RUN apk add --no-cache dumb-init curl
+RUN apk add --no-cache dumb-init curl openssl
 
 WORKDIR /app
 
-# Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodeuser -u 1001
 
-# Build stage
 FROM base AS build
 
 ARG CACHE_BUST=1
 
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./
 
-# Install all deps for TypeScript build
+# Placeholder for prisma generate; runtime uses PAYMENT_POSTGRESDB_URI
+ENV POSTGRESDB_URI=postgresql://build:build@127.0.0.1:5432/build
+ENV PAYMENT_POSTGRESDB_URI=postgresql://build:build@127.0.0.1:5432/build
+
 RUN if [ -f package-lock.json ]; then \
       npm ci --no-audit --no-fund; \
     else \
@@ -28,10 +30,10 @@ COPY tsconfig.json ./
 RUN echo "Cache bust value: ${CACHE_BUST}" > /dev/null
 COPY src ./src
 
+RUN npx prisma generate
 RUN npm run build
 RUN npm prune --omit=dev
 
-# Production stage
 FROM base AS production
 
 ENV NODE_ENV=production
@@ -41,6 +43,8 @@ ENV LOG_LEVEL=info
 COPY --from=build --chown=nodeuser:nodejs /app/node_modules ./node_modules
 COPY --from=build --chown=nodeuser:nodejs /app/dist ./dist
 COPY --from=build --chown=nodeuser:nodejs /app/package.json ./
+COPY --from=build --chown=nodeuser:nodejs /app/prisma ./prisma
+COPY --from=build --chown=nodeuser:nodejs /app/prisma.config.ts ./
 
 RUN mkdir -p logs && chown -R nodeuser:nodejs logs
 

@@ -246,9 +246,9 @@ export class PaymentController {
   }
 
   static async updatePayoutStatus(req: Request, res: Response): Promise<void> {
+    const { id } = req.params;
+    const { status } = req.body || {};
     try {
-      const { id } = req.params;
-      const { status } = req.body || {};
       if (!id) {
         throw new Error('Payout id is required');
       }
