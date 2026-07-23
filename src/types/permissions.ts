@@ -121,6 +121,9 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.PAYOUT}.${Action.LIST}`,
     `${Resource.PAYOUT}.${Action.VIEW}`,
     `${Resource.PAYOUT}.${Action.UPDATE}`,
+    // Payments
+    `${Resource.PAYMENT}.${Action.VIEW}`,
+    `${Resource.PAYMENT}.${Action.LIST}`,
   ],
   
   operations: [

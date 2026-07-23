@@ -7,12 +7,13 @@ import inviteRoutes from './invites';
 import supportRoutes from './support';
 import analyticsRoutes from './analytics';
 import applicationRoutes from './applications';
+import payoutRoutes from './payouts';
 import paymentRoutes from './payments';
 import notificationRoutes from './notifications';
 import taskCallRoutes from './taskCalls';
 import kycReviewRoutes from './kycReviews';
 import aadhaarFollowUpRoutes from './aadhaarFollowUps';
-import payoutRoutes from './payouts';
+import bookNowRoutes from './bookNow';
 
 const router = Router();
 
@@ -28,12 +29,13 @@ router.use(`${API_PREFIX}/applications`, applicationRoutes);
 router.use(`${API_PREFIX}/invites`, inviteRoutes);
 router.use(`${API_PREFIX}/support`, supportRoutes);
 router.use(`${API_PREFIX}/analytics`, analyticsRoutes);
+router.use(`${API_PREFIX}/payouts`, payoutRoutes);
 router.use(`${API_PREFIX}/payments`, paymentRoutes);
 router.use(`${API_PREFIX}/notifications`, notificationRoutes);
 router.use(`${API_PREFIX}/task-calls`, taskCallRoutes);
 router.use(`${API_PREFIX}/kyc-reviews`, kycReviewRoutes);
 router.use(`${API_PREFIX}/aadhaar-followups`, aadhaarFollowUpRoutes);
-router.use(`${API_PREFIX}/payouts`, payoutRoutes);
+router.use(`${API_PREFIX}/book-now`, bookNowRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

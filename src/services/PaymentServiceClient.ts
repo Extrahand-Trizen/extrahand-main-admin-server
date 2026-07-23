@@ -31,6 +31,30 @@ export class PaymentServiceClient {
         return Promise.reject(error);
       },
     );
+
+    this.client.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        logger.error('Payment Service Response Error:', {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+          url: error.config?.url,
+          method: error.config?.method,
+        });
+        return Promise.reject(error);
+      },
+    );
+  }
+
+  async get(path: string, params?: Record<string, any>): Promise<any> {
+    const response = await this.client.get(path, { params });
+    return response.data;
+  }
+
+  async patch(path: string, body: Record<string, any>): Promise<any> {
+    const response = await this.client.patch(path, body);
+    return response.data;
   }
 
   async listManualOpsPayoutQueue(params?: {

@@ -23,7 +23,6 @@ import {
   taskMatchesAssigneeFilter,
 } from '../services/TaskAssignmentService';
 import { TaskAssignment } from '../models/TaskAssignment';
-import { userServiceClient } from '../services/UserServiceClient';
 
 type UpstreamPagination = {
   page?: number;
@@ -150,28 +149,6 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
   });
 }
 
-async function enrichTasksWithAssigneeName(tasks: any[]): Promise<any[]> {
-  const assigneeIds = Array.from(new Set(
-    tasks.map((t) => t.assigneeId).filter(Boolean)
-  ));
-  if (assigneeIds.length === 0) return tasks;
-
-  try {
-    const result = await userServiceClient.getProfilesBatch(assigneeIds);
-    const profiles = Array.isArray(result?.profiles) ? result.profiles : [];
-    const profileMap = new Map(
-      profiles.map((p: any) => [String(p._id || p.id), p.name || 'Unknown'])
-    );
-    return tasks.map((task) => ({
-      ...task,
-      assigneeName: task.assigneeId ? (profileMap.get(String(task.assigneeId)) ?? null) : null,
-    }));
-  } catch (error) {
-    logger.warn('Failed to enrich tasks with assignee name', error);
-    return tasks;
-  }
-}
-
 async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise<any[]> {
   const maxTasks = 1000;
   const upstreamLimit = 50;
@@ -238,10 +215,6 @@ export class TaskManagementController {
         (req.query.customerId as string) || (req.query.CustomerId as string);
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
-      const requestedStatus = String(req.query.status || '').trim();
-      const bookingSource = String(req.query.bookingSource || '').trim();
-      const isOverdueFilter = requestedStatus === 'overdue';
-
       const assigneeFilter =
         assignedToParam && assignedToParam !== 'all'
           ? resolveAssigneeFilter(assignedToParam)
@@ -250,80 +223,35 @@ export class TaskManagementController {
         ? await resolveAssigneeFilterUserId(assigneeFilter)
         : null;
 
-      // For overdue, we query open tasks from task service and filter by deadline on our side
-      // For open, we exclude overdue tasks (those with past scheduledDate and non-flexible dateOption)
-      const upstreamStatus = isOverdueFilter ? 'open' : requestedStatus;
-
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined,
         search: req.query.search as string,
-        status: upstreamStatus,
-        excludeOverdue: requestedStatus === 'open' ? 'true' : undefined,
+        status: req.query.status as string,
         category: req.query.category as string,
         CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
-        // Pass bookingSource directly to task service so it filters at DB level
-        // (bypasses the marketplace-only clause for book_now / posted_task)
-        bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : undefined,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
 
-      // We need local filtering if: overdue filter, followUpStatus filter, or assignee filter
-      // bookingSource is now handled upstream by the task service
       const needsLocalFilter =
-        isOverdueFilter ||
-        (followUpStatus && followUpStatus !== 'all') ||
-        Boolean(assigneeFilter);
+        (followUpStatus && followUpStatus !== 'all') || Boolean(assigneeFilter);
 
       if (needsLocalFilter) {
         const requestedPage = params.page || 1;
         const requestedLimit = params.limit || 20;
-
-        // For overdue: fetch all open tasks (no page limit) to filter locally
-        const fetchParams: Record<string, any> = {
+        const allTasks = await fetchTasksForLocalFiltering({
           search: params.search,
-          status: upstreamStatus,
+          status: params.status,
           category: params.category,
           CustomerId: params.CustomerId,
           assigneeId: params.assigneeId,
-          bookingSource: params.bookingSource,
           sortBy: params.sortBy,
           sortOrder: params.sortOrder,
-        };
-        // Don't send excludeOverdue when fetching for overdue filter
-        // (we want ALL open tasks including overdue ones, then filter locally)
-        if (!isOverdueFilter && params.excludeOverdue) {
-          fetchParams.excludeOverdue = params.excludeOverdue;
-        }
-
-        const allTasks = await fetchTasksForLocalFiltering(fetchParams);
+        });
         let enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
         enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
-        enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
-
-        // Apply overdue filter: open tasks whose scheduledDate has passed (and not flexible)
-        if (isOverdueFilter) {
-          const now = new Date();
-          enrichedTasks = enrichedTasks.filter((task) => {
-            if (task.status !== 'open') return false;
-            if (!task.scheduledDate) return false;
-            if (task.dateOption === 'flexible') return false;
-            return new Date(task.scheduledDate) < now;
-          });
-        }
-
-        // When filtering by 'open' status, strip out tasks whose deadline has passed
-        if (!isOverdueFilter && requestedStatus === 'open') {
-          const now = new Date();
-          enrichedTasks = enrichedTasks.filter((task) => {
-            if (task.status !== 'open') return true;
-            if (!task.scheduledDate) return true;
-            if (task.dateOption === 'flexible') return true;
-            return new Date(task.scheduledDate) >= now;
-          });
-        }
 
         // Apply followUpStatus filter
         if (followUpStatus && followUpStatus !== 'all') {
@@ -362,20 +290,6 @@ export class TaskManagementController {
         : [];
       let enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
       enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
-      enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
-
-      // When filtering by 'open', exclude tasks whose deadline has already passed
-      // (overdue tasks should only appear when 'overdue' filter is selected)
-      if (requestedStatus === 'open') {
-        const now = new Date();
-        enrichedTasks = enrichedTasks.filter((task) => {
-          if (task.status !== 'open') return true; // keep non-open tasks unchanged
-          if (!task.scheduledDate) return true; // no deadline = not overdue
-          if (task.dateOption === 'flexible') return true; // flexible = not overdue
-          return new Date(task.scheduledDate) >= now; // keep only future deadlines
-        });
-      }
-
       const pagination = extractPagination(result);
       
       res.json({
@@ -391,7 +305,6 @@ export class TaskManagementController {
       });
     }
   }
-
 
   /**
    * GET /api/v1/applications
@@ -440,7 +353,6 @@ export class TaskManagementController {
       const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
       let [enrichedTask] = await enrichTasksWithTaskCallStatus([normalizedTask]);
       [enrichedTask] = await enrichTasksWithAssignedTo([enrichedTask]);
-      [enrichedTask] = await enrichTasksWithAssigneeName([enrichedTask]);
       
       res.json({
         success: true,
@@ -630,112 +542,6 @@ export class TaskManagementController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to update application status',
-      });
-    }
-  }
-
-  /**
-   * POST /api/v1/tasks/:taskId/assign
-   * Assign a helper to a Book Now task.
-   */
-  static async unassignHelper(req: Request, res: Response): Promise<void> {
-    try {
-      const { taskId } = req.params;
-      const { escrowId } = req.body;
-      const adminUserId = (req.admin as any)?.userId;
-
-      const result = await taskServiceClient.unassignHelper({ taskId, escrowId }, adminUserId);
-
-      await createAuditLog(
-        req,
-        `${Resource.TASK}.assign_helper`,
-        Resource.TASK,
-        taskId,
-        { action: 'unassigned', escrowId }
-      );
-
-      res.json({
-        success: true,
-        data: result.data || result,
-      });
-    } catch (error: any) {
-      logger.error('Unassign helper error:', error);
-      res.status(getClientSafeStatus(error)).json({
-        success: false,
-        error: error.response?.data?.error || error.message || 'Failed to unassign helper',
-      });
-    }
-  }
-
-  static async assignHelper(req: Request, res: Response): Promise<void> {
-    try {
-      const { taskId } = req.params;
-      const { helperUid, helperProfileId, helperName } = req.body;
-      const adminUserId = (req.admin as any)?.userId;
-
-      if (!helperUid || !helperProfileId) {
-        res.status(400).json({ success: false, error: 'helperUid and helperProfileId are required' });
-        return;
-      }
-
-      // Resolve booking order info for this task
-      let bookingInfo;
-      try {
-        bookingInfo = await taskServiceClient.getBookingByTaskId(taskId);
-      } catch (err: any) {
-        logger.info(`Booking info not found for task ${taskId}: ${err.message}. Using direct assignment fallback.`);
-      }
-
-      if (bookingInfo?.success && bookingInfo?.data) {
-        const { orderId, bookingItemId } = bookingInfo.data;
-
-        const result = await taskServiceClient.assignHelper({
-          orderId,
-          helperUid,
-          helperProfileId,
-          helperName,
-          bookingItemId: bookingItemId || undefined,
-        }, adminUserId);
-
-        await createAuditLog(
-          req,
-          `${Resource.TASK}.assign_helper`,
-          Resource.TASK,
-          taskId,
-          { helperUid, helperProfileId, orderId }
-        );
-
-        res.json({
-          success: true,
-          data: result.data || result,
-        });
-      } else {
-        logger.info(`Using direct helper assignment fallback for task ${taskId}`);
-        const result = await taskServiceClient.assignHelperDirect({
-          taskId,
-          helperUid,
-          helperProfileId,
-          helperName,
-        }, adminUserId);
-
-        await createAuditLog(
-          req,
-          `${Resource.TASK}.assign_helper_direct`,
-          Resource.TASK,
-          taskId,
-          { helperUid, helperProfileId }
-        );
-
-        res.json({
-          success: true,
-          data: result.data || result,
-        });
-      }
-    } catch (error: any) {
-      logger.error('Assign helper error:', error);
-      res.status(getClientSafeStatus(error)).json({
-        success: false,
-        error: error.response?.data?.error || error.message || 'Failed to assign helper',
       });
     }
   }

@@ -2,9 +2,6 @@ import axios, { AxiosInstance } from 'axios';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
-const taskCache = new Map<string, { data: any; expiry: number }>();
-const TASK_CACHE_TTL_MS = 60_000;
-
 export class TaskServiceClient {
   private client: AxiosInstance;
   private readonly serviceUserId = 'main-admin-service';
@@ -52,43 +49,12 @@ export class TaskServiceClient {
    * Get task by ID
    */
   async getTask(taskId: string): Promise<any> {
-    const cached = taskCache.get(taskId);
-    if (cached && cached.expiry > Date.now()) return cached.data;
     const response = await this.client.get(`/api/v1/tasks/${taskId}`);
-    taskCache.set(taskId, { data: response.data, expiry: Date.now() + TASK_CACHE_TTL_MS });
     return response.data;
   }
 
   async getTasksBatch(taskIds: string[]): Promise<any> {
-    if (!taskIds.length) return { tasks: [] };
-    const key = `batch:${taskIds.sort().join(',')}`;
-    const cached = taskCache.get(key);
-    if (cached && cached.expiry > Date.now()) return cached.data;
-    
-    try {
-      const mongoose = require('mongoose');
-      if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
-        const objectIds = taskIds.map((id: string) => {
-          try { return new mongoose.Types.ObjectId(id); } catch { return null; }
-        }).filter(Boolean);
-        
-        const tasks = await mongoose.connection.db.collection('tasks').find({
-          $or: [
-            { _id: { $in: objectIds } },
-            { id: { $in: taskIds } }
-          ]
-        }).project({ _id: 1, id: 1, title: 1, assigneeUid: 1, assigneeId: 1 }).toArray();
-        
-        const data = { tasks };
-        taskCache.set(key, { data, expiry: Date.now() + TASK_CACHE_TTL_MS });
-        return data;
-      }
-    } catch (err) {
-      logger.warn('Direct MongoDB fetch failed for tasks batch, falling back to HTTP:', err);
-    }
-
     const response = await this.client.post('/api/v1/tasks/batch', { taskIds });
-    taskCache.set(key, { data: response.data, expiry: Date.now() + TASK_CACHE_TTL_MS });
     return response.data;
   }
   
@@ -100,11 +66,9 @@ export class TaskServiceClient {
     limit?: number;
     search?: string;
     status?: string;
-    excludeOverdue?: string;
     category?: string;
     CustomerId?: string;
     assigneeId?: string;
-    bookingSource?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<any> {
@@ -204,62 +168,6 @@ export class TaskServiceClient {
     return response.data;
   }
 
-  /**
-   * Assign a helper to a Book Now task via task service.
-   * adminUserId is passed as X-User-Id so task service records the acting admin.
-   */
-  async assignHelper(params: {
-    orderId: string;
-    helperUid: string;
-    helperProfileId: string;
-    helperName?: string;
-    bookingItemId?: string;
-  }, adminUserId?: string): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (adminUserId) {
-      headers['X-User-Id'] = adminUserId;
-    }
-    const response = await this.client.post('/api/v1/admin/assignments/assign', params, { headers });
-    return response.data;
-  }
-
-  async unassignHelper(params: {
-    taskId: string;
-    escrowId?: string;
-  }, adminUserId?: string): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (adminUserId) {
-      headers['X-User-Id'] = adminUserId;
-    }
-    const response = await this.client.post('/api/v1/admin/assignments/unassign', params, { headers });
-    return response.data;
-  }
-
-  /**
-   * Directly assign a helper to a task (fallback).
-   */
-  async assignHelperDirect(params: {
-    taskId: string;
-    helperUid: string;
-    helperProfileId: string;
-    helperName?: string;
-  }, adminUserId?: string): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (adminUserId) {
-      headers['X-User-Id'] = adminUserId;
-    }
-    const response = await this.client.post('/api/v1/admin/assignments/assign-direct', params, { headers });
-    return response.data;
-  }
-
-  /**
-   * Get booking order info for a task (admin endpoint, no ownership check).
-   */
-  async getBookingByTaskId(taskId: string): Promise<any> {
-    const response = await this.client.get(`/api/v1/admin/assignments/by-task/${taskId}`);
-    return response.data;
-  }
-
   async getCustomerAnalytics(requesterId: string, range: '7d' | '30d' | '90d' = '30d'): Promise<any> {
     const response = await this.client.get(`/api/v1/analytics/Customers/${requesterId}`, {
       params: { range },
@@ -318,6 +226,29 @@ export class TaskServiceClient {
       `/api/v1/tasks/${taskId}/applications/${applicationId}`,
       { status }
     );
+    return response.data;
+  }
+
+  async listPendingBookNowAssignments(params?: Record<string, unknown>): Promise<unknown> {
+    const response = await this.client.get('/api/v1/admin/assignments/pending', { params });
+    return response.data;
+  }
+
+  async assignBookNowHelper(body: {
+    orderId: string;
+    helperUid: string;
+    helperProfileId: string;
+    bookingItemId?: string;
+    assignedByUid: string;
+  }): Promise<unknown> {
+    const response = await this.client.post('/api/v1/admin/assignments/assign', body);
+    return response.data;
+  }
+
+  async getDispatchMetrics(): Promise<unknown> {
+    const response = await this.client.get('/api/v1/analytics/dispatch', {
+      headers: { 'X-User-Id': this.serviceUserId },
+    });
     return response.data;
   }
 }
