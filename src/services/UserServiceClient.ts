@@ -247,6 +247,16 @@ export class UserServiceClient {
     );
     return response.data;
   }
+
+  /**
+   * Search helpers (taskers) by name or phone (admin - for Assign Helper modal).
+   */
+  async searchHelpers(q: string): Promise<any> {
+    const response = await this.client.get('/api/v1/users/helpers/search', {
+      params: { q },
+    });
+    return response.data;
+  }
 }
 
 export const userServiceClient = new UserServiceClient();

@@ -463,4 +463,26 @@ export class UserManagementController {
       });
     }
   }
+
+  /**
+   * GET /api/v1/users/helpers/search?q=<query>
+   * Search helpers (taskers) by name or phone for the Assign Helper modal.
+   */
+  static async searchHelpers(req: Request, res: Response): Promise<void> {
+    try {
+      const q = (req.query.q as string || '').trim();
+      if (!q) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+      const result = await userServiceClient.searchHelpers(q);
+      res.json(result);
+    } catch (error: any) {
+      logger.error('Search helpers error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to search helpers',
+      });
+    }
+  }
 }

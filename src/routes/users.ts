@@ -40,6 +40,13 @@ router.get(
   UserManagementController.getUserRegistrationSource
 );
 
+// GET /helpers/search?q=<query> — Search helpers for Assign Helper modal
+router.get(
+  '/helpers/search',
+  requirePermission(`${Resource.USER}.${Action.LIST}`),
+  UserManagementController.searchHelpers
+);
+
 router.get(
   '/:userId',
   requirePermission(`${Resource.USER}.${Action.VIEW}`),
