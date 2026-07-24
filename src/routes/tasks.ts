@@ -101,6 +101,12 @@ router.post(
   TaskManagementController.assignHelper
 );
 
+router.post(
+  '/:taskId/assign-partner',
+  requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
+  TaskManagementController.assignPartner
+);
+
 router.get(
   '/:taskId/applications',
   requirePermission(`${Resource.TASK_APPLICATION}.${Action.LIST}`),

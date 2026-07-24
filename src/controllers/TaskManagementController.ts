@@ -740,6 +740,79 @@ export class TaskManagementController {
     }
   }
 
+  static async assignPartner(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+      const { partnerUid, partnerProfileId, partnerName } = req.body;
+      const adminUserId = (req.admin as any)?.userId;
+
+      if (!partnerUid || !partnerProfileId) {
+        res.status(400).json({ success: false, error: 'partnerUid and partnerProfileId are required' });
+        return;
+      }
+
+      // Resolve booking order info for this task
+      let bookingInfo;
+      try {
+        bookingInfo = await taskServiceClient.getBookingByTaskId(taskId);
+      } catch (err: any) {
+        logger.info(`Booking info not found for task ${taskId}: ${err.message}. Using direct assignment fallback.`);
+      }
+
+      if (bookingInfo?.success && bookingInfo?.data) {
+        const { orderId, bookingItemId } = bookingInfo.data;
+
+        const result = await taskServiceClient.assignPartner({
+          orderId,
+          helperUid: partnerUid,
+          helperProfileId: partnerProfileId,
+          helperName: partnerName,
+          bookingItemId: bookingItemId || undefined,
+        }, adminUserId);
+
+        await createAuditLog(
+          req,
+          `${Resource.TASK}.assign_partner`,
+          Resource.TASK,
+          taskId,
+          { partnerUid, partnerProfileId, orderId }
+        );
+
+        res.json({
+          success: true,
+          data: result.data || result,
+        });
+      } else {
+        logger.info(`Using direct partner assignment fallback for task ${taskId}`);
+        const result = await taskServiceClient.assignPartnerDirect({
+          taskId,
+          helperUid: partnerUid,
+          helperProfileId: partnerProfileId,
+          helperName: partnerName,
+        }, adminUserId);
+
+        await createAuditLog(
+          req,
+          `${Resource.TASK}.assign_partner_direct`,
+          Resource.TASK,
+          taskId,
+          { partnerUid, partnerProfileId }
+        );
+
+        res.json({
+          success: true,
+          data: result.data || result,
+        });
+      }
+    } catch (error: any) {
+      logger.error('Assign partner error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || error.message || 'Failed to assign partner',
+      });
+    }
+  }
+
   /**
    * POST /api/v1/tasks/:taskId/delete-requests
    * Operations creates a delete request for Super Admin approval.

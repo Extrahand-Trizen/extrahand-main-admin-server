@@ -253,6 +253,41 @@ export class TaskServiceClient {
   }
 
   /**
+   * Assign a partner to a Book Now task.
+   */
+  async assignPartner(params: {
+    orderId: string;
+    helperUid: string;
+    helperProfileId: string;
+    helperName?: string;
+    bookingItemId?: string;
+  }, adminUserId?: string): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (adminUserId) {
+      headers['X-User-Id'] = adminUserId;
+    }
+    const response = await this.client.post('/api/v1/admin/assignments/assign-partner', params, { headers });
+    return response.data;
+  }
+
+  /**
+   * Directly assign a partner to a task (fallback).
+   */
+  async assignPartnerDirect(params: {
+    taskId: string;
+    helperUid: string;
+    helperProfileId: string;
+    helperName?: string;
+  }, adminUserId?: string): Promise<any> {
+    const headers: Record<string, string> = {};
+    if (adminUserId) {
+      headers['X-User-Id'] = adminUserId;
+    }
+    const response = await this.client.post('/api/v1/admin/assignments/assign-partner-direct', params, { headers });
+    return response.data;
+  }
+
+  /**
    * Get booking order info for a task (admin endpoint, no ownership check).
    */
   async getBookingByTaskId(taskId: string): Promise<any> {
