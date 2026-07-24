@@ -16,12 +16,6 @@ router.get(
 );
 
 router.get(
-  '/helpers/search',
-  requirePermission(`${Resource.USER}.${Action.LIST}`),
-  UserManagementController.searchHelpers
-);
-
-router.get(
   '/areas/hyderabad',
   requirePermission(`${Resource.USER}.${Action.LIST}`),
   UserManagementController.getHyderabadSubAreas

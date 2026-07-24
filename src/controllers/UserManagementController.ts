@@ -134,38 +134,8 @@ export class UserManagementController {
   }
 
   /**
-   * GET /api/v1/users/helpers/search
-   * Search helpers by name or phone (dedicated endpoint that handles service auth errors gracefully).
-   */
-  static async searchHelpers(req: Request, res: Response): Promise<void> {
-    try {
-      const search = (req.query.q as string || '').trim();
-      if (!search || search.length < 2) {
-        res.json({ success: true, data: [] });
-        return;
-      }
-
-      const result = await userServiceClient.listUsers({
-        search,
-        role: 'Helper',
-        limit: 20,
-        page: 1,
-      });
-
-      res.json({
-        success: true,
-        data: result.data || [],
-      });
-    } catch (error: any) {
-      logger.error('Search helpers error:', error);
-      // Return empty array on auth errors instead of propagating the 403
-      res.json({ success: true, data: [] });
-    }
-  }
-
-  /**
    * GET  /api/v1/users/cleanup/no-role?dry_run=true   — preview (default)
-   * POST /api/v1/users/cleanup/no-role               — execute (body: { dry_run: false })
+   * POST /api/v1/users/cleanup/no-role                 — delete (body: { dry_run: false })
    */
   static async cleanupUsersWithoutRoles(req: Request, res: Response): Promise<void> {
     try {

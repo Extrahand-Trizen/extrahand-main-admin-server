@@ -1,6 +1,7 @@
+# Prisma 7.x requires Node 20.19+, 22.12+, or 24+
 FROM node:20-alpine AS base
 
-RUN apk add --no-cache dumb-init curl
+RUN apk add --no-cache dumb-init curl openssl
 
 WORKDIR /app
 
@@ -12,6 +13,12 @@ FROM base AS build
 ARG CACHE_BUST=1
 
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+
+# Placeholder for prisma generate; runtime uses PAYMENT_POSTGRESDB_URI
+ENV POSTGRESDB_URI=postgresql://build:build@127.0.0.1:5432/build
+ENV PAYMENT_POSTGRESDB_URI=postgresql://build:build@127.0.0.1:5432/build
 
 RUN if [ -f package-lock.json ]; then \
       npm ci --no-audit --no-fund; \
@@ -19,10 +26,7 @@ RUN if [ -f package-lock.json ]; then \
       npm install --no-audit --no-fund; \
     fi
 
-RUN npm install --no-save prisma@^7.8.0
-
 COPY tsconfig.json ./
-COPY prisma ./prisma
 RUN echo "Cache bust value: ${CACHE_BUST}" > /dev/null
 COPY src ./src
 
@@ -38,8 +42,9 @@ ENV LOG_LEVEL=info
 
 COPY --from=build --chown=nodeuser:nodejs /app/node_modules ./node_modules
 COPY --from=build --chown=nodeuser:nodejs /app/dist ./dist
-COPY --from=build --chown=nodeuser:nodejs /app/prisma ./prisma
 COPY --from=build --chown=nodeuser:nodejs /app/package.json ./
+COPY --from=build --chown=nodeuser:nodejs /app/prisma ./prisma
+COPY --from=build --chown=nodeuser:nodejs /app/prisma.config.ts ./
 
 RUN mkdir -p logs && chown -R nodeuser:nodejs logs
 

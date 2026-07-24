@@ -19,6 +19,9 @@ export enum Resource {
   
   // Support
   SUPPORT_TICKET = 'support.ticket',
+
+  // Payout operations
+  PAYOUT = 'payout',
   
   // Admin Management
   ADMIN_USER = 'admin.user',
@@ -114,6 +117,10 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.ANALYTICS}.${Action.VIEW}`,
     `${Resource.ANALYTICS}.${Action.EXPORT}`,
 
+    // Payouts
+    `${Resource.PAYOUT}.${Action.LIST}`,
+    `${Resource.PAYOUT}.${Action.VIEW}`,
+    `${Resource.PAYOUT}.${Action.UPDATE}`,
     // Payments
     `${Resource.PAYMENT}.${Action.VIEW}`,
     `${Resource.PAYMENT}.${Action.LIST}`,
@@ -162,6 +169,11 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
 
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
+
+    // Payouts
+    `${Resource.PAYOUT}.${Action.LIST}`,
+    `${Resource.PAYOUT}.${Action.VIEW}`,
+    `${Resource.PAYOUT}.${Action.UPDATE}`,
   ],
   
   support: [
