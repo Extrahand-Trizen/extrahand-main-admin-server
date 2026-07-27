@@ -1,10 +1,13 @@
 import { Request, Response } from 'express';
 import { AdminUser } from '../models/AdminUser';
+import { TaskAssignment } from '../models/TaskAssignment';
+import { AadhaarKycAssignment } from '../models/AadhaarKycAssignment';
 import { PermissionService } from '../services/PermissionService';
 import { DashboardType } from '../types/dashboard';
 import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import bcrypt from 'bcrypt';
+import { TASK_POSTED_ROUND_ROBIN_EMAILS } from '../constants/taskAssignment';
 
 export class AdminUserController {
   /**
@@ -402,6 +405,199 @@ export class AdminUserController {
       });
     }
   }
+  /**
+   * GET /api/v1/admin/users/:userId/assignments-summary
+   * Returns count of task assignments and aadhaar follow-up assignments for a given admin user.
+   * Used by the frontend to decide whether to show a transfer step before deletion.
+   */
+  static async getAssignmentsSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+
+      const user = await AdminUser.findOne({ userId }).lean();
+      if (!user) {
+        res.status(404).json({ success: false, error: 'Admin user not found' });
+        return;
+      }
+
+      const [taskCount, aadhaarCount] = await Promise.all([
+        TaskAssignment.countDocuments({ assignedToUserId: userId }),
+        AadhaarKycAssignment.countDocuments({ assignedToUserId: userId }),
+      ]);
+
+      // Find remaining active operations admins (excluding this user) who can receive work
+      // Limited to round-robin email list (durgamshiva and tadembharath)
+      const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+      const allActiveOpsAdmins = await AdminUser.find({
+        status: 'active',
+        userId: { $ne: userId },
+        email: { $in: TASK_POSTED_ROUND_ROBIN_EMAILS as any },
+        'dashboardAccess': {
+          $elemMatch: {
+            dashboardType: DashboardType.MAIN_ADMIN,
+            status: 'active',
+            role: { $in: OPS_ROLES },
+          },
+        },
+      })
+        .select('userId name email')
+        .lean();
+
+      res.json({
+        success: true,
+        data: {
+          taskAssignmentCount: taskCount,
+          aadhaarAssignmentCount: aadhaarCount,
+          totalAssignments: taskCount + aadhaarCount,
+          hasAssignments: taskCount + aadhaarCount > 0,
+          remainingActiveOpsAdmins: allActiveOpsAdmins.map((a) => ({
+            userId: a.userId,
+            name: a.name,
+            email: a.email,
+          })),
+          canDelete: allActiveOpsAdmins.length > 0 || taskCount + aadhaarCount === 0,
+        },
+      });
+    } catch (error: any) {
+      logger.error('getAssignmentsSummary error:', error);
+      res.status(500).json({ success: false, error: 'Failed to get assignment summary' });
+    }
+  }
+
+  /**
+   * POST /api/v1/admin/users/:userId/transfer-and-delete
+   * Transfers all task assignments and aadhaar follow-up assignments equally
+   * (round-robin) to remaining active operations admins, then deletes the admin user.
+   * Super Admin only.
+   */
+  static async transferAndDeleteAdminUser(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+
+      const user = await AdminUser.findOne({ userId });
+      if (!user) {
+        res.status(404).json({ success: false, error: 'Admin user not found' });
+        return;
+      }
+
+      // Prevent self-deletion
+      if (user.userId === req.admin!.userId) {
+        res.status(400).json({ success: false, error: 'Cannot delete yourself' });
+        return;
+      }
+
+      // Find remaining active operations admins (excluding this user)
+      // Limited to round-robin email list (durgamshiva and tadembharath)
+      const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+      const remainingAdmins = await AdminUser.find({
+        status: 'active',
+        userId: { $ne: userId },
+        email: { $in: TASK_POSTED_ROUND_ROBIN_EMAILS as any },
+        'dashboardAccess': {
+          $elemMatch: {
+            dashboardType: DashboardType.MAIN_ADMIN,
+            status: 'active',
+            role: { $in: OPS_ROLES },
+          },
+        },
+      })
+        .select('userId name email')
+        .lean();
+
+      // Fetch all task assignments and aadhaar assignments belonging to deleted user
+      const [taskAssignments, aadhaarAssignments] = await Promise.all([
+        TaskAssignment.find({ assignedToUserId: userId }).lean(),
+        AadhaarKycAssignment.find({ assignedToUserId: userId }).lean(),
+      ]);
+
+      const totalAssignments = taskAssignments.length + aadhaarAssignments.length;
+
+      // If there are assignments but no remaining admins, block deletion
+      if (totalAssignments > 0 && remainingAdmins.length === 0) {
+        res.status(400).json({
+          success: false,
+          error:
+            'Cannot delete this admin user — there are no other active operations admins to transfer their assigned work to. Please add another operations admin first.',
+        });
+        return;
+      }
+
+      let transferredTasks = 0;
+      let transferredAadhaar = 0;
+
+      // Redistribute task assignments round-robin
+      if (taskAssignments.length > 0 && remainingAdmins.length > 0) {
+        const taskBulkOps = taskAssignments.map((assignment, index) => {
+          const recipient = remainingAdmins[index % remainingAdmins.length];
+          return {
+            updateOne: {
+              filter: { _id: assignment._id },
+              update: {
+                $set: {
+                  assignedToUserId: recipient.userId,
+                  assignedToEmail: recipient.email,
+                  assignedToName: recipient.name,
+                },
+              },
+            },
+          };
+        });
+        await TaskAssignment.bulkWrite(taskBulkOps);
+        transferredTasks = taskAssignments.length;
+      }
+
+      // Redistribute aadhaar KYC assignments round-robin
+      if (aadhaarAssignments.length > 0 && remainingAdmins.length > 0) {
+        const aadhaarBulkOps = aadhaarAssignments.map((assignment, index) => {
+          const recipient = remainingAdmins[index % remainingAdmins.length];
+          return {
+            updateOne: {
+              filter: { _id: assignment._id },
+              update: {
+                $set: {
+                  assignedToUserId: recipient.userId,
+                  assignedToEmail: recipient.email,
+                  assignedToName: recipient.name,
+                },
+              },
+            },
+          };
+        });
+        await AadhaarKycAssignment.bulkWrite(aadhaarBulkOps);
+        transferredAadhaar = aadhaarAssignments.length;
+      }
+
+      // Now delete the admin user
+      await AdminUser.deleteOne({ userId });
+
+      await createAuditLog(
+        req,
+        'admin.user.transfer-and-delete',
+        'admin_user',
+        userId,
+        {
+          email: user.email,
+          transferredTasks,
+          transferredAadhaar,
+          redistributedTo: remainingAdmins.map((a) => a.email),
+        },
+      );
+
+      res.json({
+        success: true,
+        message: 'Admin user deleted successfully after transferring assignments',
+        data: {
+          transferredTasks,
+          transferredAadhaar,
+          redistributedTo: remainingAdmins.map((a) => ({ userId: a.userId, name: a.name, email: a.email })),
+        },
+      });
+    } catch (error: any) {
+      logger.error('transferAndDeleteAdminUser error:', error);
+      res.status(500).json({ success: false, error: 'Failed to transfer and delete admin user' });
+    }
+  }
+
   /**
    * DELETE /api/v1/admin/users/:userId
    * Delete admin user (Super Admin only)

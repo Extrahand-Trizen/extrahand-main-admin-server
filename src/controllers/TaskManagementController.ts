@@ -1012,7 +1012,6 @@ export class TaskManagementController {
       const opsAdmins = await AdminUser.find({
         email: {
           $in: [
-            'santhoshu@cognitbotz.com',
             'durgamshiva@cognitbotz.com',
             'tadembharat@cognitbotz.com',
           ],

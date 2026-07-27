@@ -11,9 +11,11 @@ router.use(verifyAuth);
 // Admin user management (Super Admin only)
 router.get('/users', requireSuperAdmin, AdminUserController.listUsers);
 router.get('/users/:userId', requireSuperAdmin, AdminUserController.getUser);
+router.get('/users/:userId/assignments-summary', requireSuperAdmin, AdminUserController.getAssignmentsSummary);
 router.post('/users', requireSuperAdmin, AdminUserController.createUser);
 router.put('/users/:userId', requireSuperAdmin, AdminUserController.updateUser);
 router.delete('/users/:userId', requireSuperAdmin, AdminUserController.deleteAdminUser);
+router.post('/users/:userId/transfer-and-delete', requireSuperAdmin, AdminUserController.transferAndDeleteAdminUser);
 router.post('/users/:userId/dashboard-access', requireSuperAdmin, AdminUserController.addDashboardAccess);
 router.delete('/users/:userId/dashboard-access/:dashboardType', requireSuperAdmin, AdminUserController.removeDashboardAccess);
 

@@ -1,15 +1,13 @@
 /**
- * Only these 3 operations admins receive task_posted in-app notifications (round-robin).
+ * Only these 2 operations admins receive task_posted in-app notifications (round-robin).
  * No email is sent for task assignment — dashboard bell only.
  */
 export const TASK_POSTED_ROUND_ROBIN_EMAILS = [
-  'santhoshu@cognitbotz.com',
   'durgamshiva@cognitbotz.com',
   'tadembharat@cognitbotz.com',
 ] as const;
 
 export const TASK_ASSIGNED_EMAIL_TO_NAME: Record<string, string> = {
-  'santhoshu@cognitbotz.com': 'santhosh reddy',
   'durgamshiva@cognitbotz.com': 'durgamshiva',
   'tadembharat@cognitbotz.com': 'tadembharath',
 };
