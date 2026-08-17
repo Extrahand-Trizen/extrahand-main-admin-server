@@ -7,6 +7,7 @@ import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
+import { taskServiceClient } from '../services/TaskServiceClient';
 
 function getAadhaarNotificationType(user: any):
   | 'aadhaar_verification_failed'
@@ -53,6 +54,38 @@ async function ensureAadhaarOpsNotification(user: any): Promise<void> {
     sessionId: user?.aadhaarKyc?.verificationId || user?.aadhaarKyc?.id,
     occurredAt: new Date().toISOString(),
   });
+}
+
+async function enrichUserCancellationPassStatus(user: any): Promise<any> {
+  if (!user) return user;
+
+  const isPartner =
+    user.role === 'Partner' ||
+    user.roles?.includes('Partner') ||
+    user.role === 'partner';
+
+  if (!isPartner) return user;
+
+  const partnerUid = user.uid || user.userId;
+  if (!partnerUid) return user;
+
+  try {
+    const response = await taskServiceClient.getCancellationPassStatusForUser(String(partnerUid));
+    const passStatus = response?.data ?? response;
+    if (passStatus && typeof passStatus === 'object') {
+      user.cancellationPassStatus = passStatus;
+      if (typeof passStatus.used === 'number') {
+        user.passesUsed = passStatus.used;
+      }
+    }
+  } catch (error: any) {
+    logger.warn('Failed to load cancellation pass status for partner user', {
+      userId: user.userId || user.uid,
+      error: error?.message || 'Unknown error',
+    });
+  }
+
+  return user;
 }
 
 export class UserManagementController {
@@ -165,17 +198,56 @@ export class UserManagementController {
       
       const result = await userServiceClient.getUser(userId, req.admin?.userId);
       const user = result.data || result;
-      await ensureAadhaarOpsNotification(user);
+      const enrichedUser = await enrichUserCancellationPassStatus(user);
+      await ensureAadhaarOpsNotification(enrichedUser);
       
       res.json({
         success: true,
-        data: user,
+        data: enrichedUser,
       });
     } catch (error: any) {
       logger.error('Get user error:', error);
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get user',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/users/:userId/cancellation-pass-status
+   * Returns the partner's current month cancellation pass status.
+   */
+  static async getUserCancellationPassStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const userResult = await userServiceClient.getUser(userId, req.admin?.userId);
+      const user = userResult?.data || userResult;
+      const uid = user?.uid || user?.userId;
+
+      if (!uid) {
+        res.json({ success: true, data: { used: 0, remaining: 3, total: 3, month: new Date().getMonth() + 1, year: new Date().getFullYear() } });
+        return;
+      }
+
+      const passStatusResponse = await taskServiceClient.getCancellationPassStatusForUser(String(uid));
+      const passStatus = passStatusResponse?.data ?? passStatusResponse ?? {
+        used: 0,
+        remaining: 3,
+        total: 3,
+        month: new Date().getMonth() + 1,
+        year: new Date().getFullYear(),
+      };
+
+      res.json({
+        success: true,
+        data: passStatus,
+      });
+    } catch (error: any) {
+      logger.error('Get user cancellation pass status error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to get partner cancellation pass status',
       });
     }
   }

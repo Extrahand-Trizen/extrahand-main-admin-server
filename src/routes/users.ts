@@ -35,6 +35,12 @@ router.post(
 );
 
 router.get(
+  '/:userId/cancellation-pass-status',
+  requirePermission(`${Resource.USER}.${Action.VIEW}`),
+  UserManagementController.getUserCancellationPassStatus
+);
+
+router.get(
   '/:userId/registration-source',
   requirePermission(`${Resource.USER}.${Action.VIEW}`),
   UserManagementController.getUserRegistrationSource

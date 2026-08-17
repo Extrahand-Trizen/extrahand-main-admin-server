@@ -188,6 +188,18 @@ export class TaskServiceClient {
   }
 
   /**
+   * Get a partner's current month's cancellation pass status for a specific user UID.
+   */
+  async getCancellationPassStatusForUser(uid: string): Promise<any> {
+    const response = await this.client.get('/api/v1/book-now/cancellation-pass-status', {
+      headers: {
+        'X-User-Id': uid,
+      },
+    });
+    return response.data;
+  }
+
+  /**
    * List applications with filters
    */
   async listApplications(params: {

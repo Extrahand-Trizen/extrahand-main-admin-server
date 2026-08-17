@@ -329,12 +329,120 @@ export class PaymentController {
       const data = await safeGet<any>(
         '/api/v1/dashboard/refunds',
         req.query as Record<string, any>,
-        { success: true, items: [], total: 0 }
+        { success: true, data: [], items: [], total: 0 }
       );
+
+      const rawRefunds = data.data ?? data.refunds ?? data.items ?? [];
+      const userCache = new Map<string, { userId?: string; name?: string }>();
+      const taskTitleCache = new Map<string, string>();
+      const uniqueUids = new Set<string>();
+      const uniqueTaskIds = new Set<string>();
+
+      rawRefunds.forEach((row: any) => {
+        const posterUid = row.posterUid || row.CustomerUid;
+        if (posterUid) uniqueUids.add(posterUid);
+        if (row.performerUid) uniqueUids.add(row.performerUid);
+        if (row.taskId) uniqueTaskIds.add(row.taskId);
+      });
+
+      // If CustomerUid was missing on some rows, look up the task to get customerId / posterUid
+      const taskCustomerMap = new Map<string, string>();
+      if (uniqueTaskIds.size > 0) {
+        try {
+          const tasksResult = await taskServiceClient.getTasksBatch(Array.from(uniqueTaskIds));
+          const tasks = tasksResult?.tasks || [];
+          tasks.forEach((t: any) => {
+            const tid = String(t._id || t.id);
+            if (t.title) taskTitleCache.set(tid, t.title);
+            const custId = t.customerId || t.posterUid || t.userId || t.creatorId;
+            if (custId) {
+              taskCustomerMap.set(tid, String(custId));
+              uniqueUids.add(String(custId));
+            }
+          });
+        } catch (err) {
+          logger.warn('Batch task lookup for refunds failed');
+        }
+      }
+
+      if (uniqueUids.size > 0) {
+        try {
+          const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
+          const users = usersResult?.profiles || [];
+          users.forEach((u: any) => {
+            userCache.set(u.uid, {
+              userId: u.uid,
+              name: u.name,
+            });
+          });
+        } catch (err) {
+          logger.warn('Batch user resolution for refunds failed');
+        }
+      }
+
+      const resolveUser = async (uid?: string): Promise<{ userId?: string; name?: string }> => {
+        if (!uid) return {};
+        if (userCache.has(uid)) return userCache.get(uid) || {};
+        try {
+          const userResult = await userServiceClient.getUser(uid);
+          const exact = userResult?.data || userResult;
+          const resolved = {
+            userId: exact?.uid || exact?.userId || exact?._id,
+            name: exact?.name || [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') || undefined,
+          };
+          userCache.set(uid, resolved);
+          return resolved;
+        } catch { /* ignore */ }
+        return {};
+      };
+
+      const resolveTaskTitle = async (taskId?: string): Promise<string | undefined> => {
+        if (!taskId) return undefined;
+        if (taskTitleCache.has(taskId)) return taskTitleCache.get(taskId);
+        try {
+          const taskResult = await taskServiceClient.getTask(taskId);
+          const taskData = taskResult?.data || taskResult;
+          const title = taskData?.title as string | undefined;
+          if (title) {
+            taskTitleCache.set(taskId, title);
+            return title;
+          }
+        } catch { /* ignore */ }
+        return undefined;
+      };
+
+      const refunds = await Promise.all(
+        rawRefunds.map(async (row: any) => {
+          let posterUid = row.CustomerUid || row.posterUid;
+          if (!posterUid && row.taskId && taskCustomerMap.has(row.taskId)) {
+            posterUid = taskCustomerMap.get(row.taskId);
+          }
+
+          const [customer, helper, taskTitle] = await Promise.all([
+            resolveUser(posterUid),
+            resolveUser(row.performerUid),
+            resolveTaskTitle(row.taskId),
+          ]);
+
+          return {
+            ...row,
+            CustomerUid: posterUid || null,
+            links: {
+              customerUserId: customer.userId || posterUid,
+              helperUserId: helper.userId || row.performerUid,
+              taskId: row.taskId,
+              customerName: customer.name || posterUid,
+              taskTitle: taskTitle || row.taskId,
+              helperName: helper.name || row.performerUid,
+            },
+          };
+        })
+      );
+
       res.json({
         success: true,
-        data: data.refunds ?? data.items ?? [],
-        total: data.total ?? 0,
+        data: refunds,
+        total: data.pagination?.total ?? data.total ?? refunds.length,
       });
     } catch (error: any) {
       logger.error('List refunds error:', error);
@@ -388,6 +496,74 @@ export class PaymentController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to fetch user bank accounts',
+      });
+    }
+  }
+
+  static async processRefund(req: Request, res: Response): Promise<void> {
+    try {
+      const {
+        razorpayOrderId,
+        razorpayPaymentId,
+        taskId,
+        reason,
+        cancelledBy,
+        taskStartDate,
+        cancelledAt,
+        userId,
+        amount,
+        assignedAt,
+        feeBaseAmount,
+      } = req.body;
+
+      // Allow refund if we at least have a taskId to fall back on
+      if (!razorpayOrderId && !taskId) {
+        res.status(400).json({
+          success: false,
+          error: 'razorpayOrderId or taskId is required',
+        });
+        return;
+      }
+
+      if (!cancelledBy || !['poster', 'performer'].includes(cancelledBy)) {
+        res.status(400).json({
+          success: false,
+          error: 'cancelledBy must be either "poster" or "performer"',
+        });
+        return;
+      }
+
+      if (!taskStartDate || !cancelledAt) {
+        res.status(400).json({
+          success: false,
+          error: 'taskStartDate and cancelledAt are required',
+        });
+        return;
+      }
+
+      const data = await paymentServiceClient.post('/api/v1/refunds/process', {
+        razorpayOrderId: razorpayOrderId || '',
+        razorpayPaymentId: razorpayPaymentId || '',
+        taskId,
+        reason,
+        cancelledBy,
+        taskStartDate,
+        cancelledAt,
+        userId,
+        amount,
+        assignedAt,
+        feeBaseAmount,
+      });
+
+      res.json({
+        success: true,
+        data: data.refund ?? data,
+      });
+    } catch (error: any) {
+      logger.error('Process refund error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || error.message || 'Failed to process refund',
       });
     }
   }

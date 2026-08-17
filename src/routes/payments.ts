@@ -49,6 +49,12 @@ router.get(
   PaymentController.listRefunds
 );
 
+router.post(
+  '/refunds/process',
+  requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),
+  PaymentController.processRefund
+);
+
 router.get(
   '/ledger',
   requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
