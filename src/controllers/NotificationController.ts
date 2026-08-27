@@ -8,6 +8,7 @@ import { getNextTaskPostedRecipient } from '../services/TaskPostedRecipientServi
 import { persistTaskAssignment } from '../services/TaskAssignmentService';
 import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
 import { buildKycReviewLinkUrl } from '../services/AadhaarKycRecipientService';
+import { sendTaskPostedEmail } from '../services/TaskPostedEmailService';
 
 const MAX_LIST_LIMIT = 100;
 
@@ -76,6 +77,7 @@ export async function createTaskPostedAdminNotification(
   assignedTo?: { userId: string; email: string; name: string };
 }> {
   const notification = buildNotificationPayload({ type: 'task_posted', ...payload });
+  const emailSent = await sendTaskPostedEmail(payload);
   const recipient = await getNextTaskPostedRecipient();
 
   if (!recipient) {
@@ -108,6 +110,7 @@ export async function createTaskPostedAdminNotification(
       assignedToUserId: recipient.userId,
       assignedToEmail: recipient.email,
       assignedToName: recipient.name,
+      ...(emailSent ? { taskPostedEmailSentAt: new Date() } : {}),
     },
   });
 

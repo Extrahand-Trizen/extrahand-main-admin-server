@@ -20,6 +20,7 @@ const TASK_CALL_EXCLUDED_EMAILS = [
 ];
 
 function isOperationsAdmin(req: Request): boolean {
+  if (req.admin?.isSuperAdmin) return true;
   return ['operations_admin', 'operation_admin', 'operations'].includes(
     req.admin?.role || '',
   );
@@ -69,7 +70,9 @@ function normalizeProfile(profile: any): any {
       profile?.phone ||
       profile?.phoneNumber ||
       profile?.mobile ||
+      profile?.mobileNumber ||
       profile?.contactNumber ||
+      profile?.alternatePhone ||
       '',
   };
 }
@@ -80,6 +83,8 @@ async function getTaskMap(taskIds: string[]) {
     const result = await taskServiceClient.getTasksBatch(taskIds);
     const rows = Array.isArray(result?.data)
       ? result.data
+      : Array.isArray(result?.tasks)
+        ? result.tasks
       : Array.isArray(result?.profiles)
         ? result.profiles
         : [];
@@ -100,7 +105,11 @@ async function getProfileMap(profileIds: string[]) {
   if (ids.length === 0) return new Map<string, any>();
   try {
     const result = await userServiceClient.getProfilesBatch(ids);
-    const rows = Array.isArray(result?.data) ? result.data : [];
+    const rows = Array.isArray(result?.data)
+      ? result.data
+      : Array.isArray(result?.profiles)
+        ? result.profiles
+        : [];
     return new Map(
       rows.map((row: any) => {
         const profile = normalizeProfile(row);
@@ -119,6 +128,16 @@ function actor(req: Request) {
     email: req.admin!.email,
     name: req.admin!.name,
   };
+}
+
+function getCallAttempts(record: any): any[] {
+  if (record?.callAttempts?.length) return record.callAttempts;
+  if (!record?.status || record.status === 'not_updated') return [];
+  return [{
+    attemptedAt: record.updatedAt || record.createdAt,
+    outcome: record.status,
+    nextRetryAt: record.status === 'call_not_lifted' ? record.followUpDate || null : null,
+  }];
 }
 
 export class TaskCallController {
@@ -162,7 +181,19 @@ export class TaskCallController {
       ]);
       const recordMap = new Map(records.map((record) => [record.taskId, record]));
       const profileMap = await getProfileMap(
-        taskIds.map((taskId) => taskMap.get(taskId)?.customerId).filter(Boolean),
+        notifications
+          .map((notification) => {
+            const taskId = String(notification.metadata?.taskId || '').trim();
+            const task = taskMap.get(taskId);
+            return (
+              task?.customerId ||
+              notification.metadata?.customerId ||
+              notification.metadata?.CustomerId ||
+              notification.metadata?.requesterId ||
+              notification.metadata?.userId
+            );
+          })
+          .filter(Boolean),
       );
 
       let rows = notifications
@@ -171,7 +202,13 @@ export class TaskCallController {
           if (!taskId) return null;
           const task = taskMap.get(taskId) || {};
           const record = recordMap.get(taskId);
-          const profile = profileMap.get(String(task.customerId || ''));
+          const customerId =
+            task.customerId ||
+            notification.metadata?.customerId ||
+            notification.metadata?.CustomerId ||
+            notification.metadata?.requesterId ||
+            notification.metadata?.userId;
+          const profile = profileMap.get(String(customerId || ''));
           return {
             notificationId: String(notification._id),
             taskId,
@@ -182,13 +219,30 @@ export class TaskCallController {
             notifiedOn: notification.createdAt,
             status: record?.status || 'not_updated',
             followUpDate: record?.followUpDate || null,
+            nextRetryAt: getCallAttempts(record).at(-1)?.nextRetryAt || null,
             notesCount: record?.notes?.length || 0,
             updatedAt: record?.updatedAt || notification.createdAt,
           };
         })
         .filter(Boolean) as any[];
 
-      if (status !== 'all') rows = rows.filter((row) => row.status === status);
+      if (status === 'pending_calls') {
+        const now = Date.now();
+        rows = rows.filter(
+          (row) =>
+            row.status === 'call_not_lifted' &&
+            row.nextRetryAt &&
+            new Date(row.nextRetryAt).getTime() <= now,
+        );
+      } else if (status === 'follow_up') {
+        rows = rows.filter(
+          (row) =>
+            row.status === 'follow_up' ||
+            (row.status === 'call_not_lifted' && row.nextRetryAt),
+        );
+      } else if (status !== 'all') {
+        rows = rows.filter((row) => row.status === status);
+      }
       if (search) {
         rows = rows.filter((row) =>
           [row.userName, row.phone, row.taskTitle, row.category, row.taskId]
@@ -234,6 +288,8 @@ export class TaskCallController {
           notificationId: notification ? String(notification._id) : record?.notificationId,
           status: record?.status || 'not_updated',
           followUpDate: record?.followUpDate || null,
+          nextRetryAt: getCallAttempts(record).at(-1)?.nextRetryAt || null,
+          callAttempts: getCallAttempts(record),
           notes: record?.notes || [],
           updatedAt: record?.updatedAt || null,
         },
@@ -253,6 +309,9 @@ export class TaskCallController {
       const followUpDate = req.body?.followUpDate
         ? new Date(req.body.followUpDate)
         : null;
+      const nextRetryAt = req.body?.nextRetryAt
+        ? new Date(req.body.nextRetryAt)
+        : null;
 
       if (!STATUSES.includes(status)) {
         res.status(400).json({ success: false, error: 'Invalid call status' });
@@ -260,6 +319,10 @@ export class TaskCallController {
       }
       if (status === 'follow_up' && (!followUpDate || Number.isNaN(followUpDate.getTime()))) {
         res.status(400).json({ success: false, error: 'Follow-up date is required' });
+        return;
+      }
+      if (status === 'call_not_lifted' && (!nextRetryAt || Number.isNaN(nextRetryAt.getTime()))) {
+        res.status(400).json({ success: false, error: 'Next retry time is required' });
         return;
       }
 
@@ -276,6 +339,13 @@ export class TaskCallController {
             status,
             followUpDate: status === 'follow_up' ? followUpDate : null,
             lastUpdatedBy: actor(req),
+          },
+          $push: {
+            callAttempts: {
+              attemptedAt: new Date(),
+              outcome: status,
+              nextRetryAt: status === 'call_not_lifted' ? nextRetryAt : null,
+            },
           },
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },

@@ -77,7 +77,16 @@ export class TaskServiceClient {
             { _id: { $in: objectIds } },
             { id: { $in: taskIds } }
           ]
-        }).project({ _id: 1, id: 1, title: 1, assigneeUid: 1, assigneeId: 1 }).toArray();
+        }).project({
+          _id: 1,
+          id: 1,
+          title: 1,
+          CustomerId: 1,
+          customerId: 1,
+          requesterId: 1,
+          assigneeUid: 1,
+          assigneeId: 1,
+        }).toArray();
         
         const data = { tasks };
         taskCache.set(key, { data, expiry: Date.now() + TASK_CACHE_TTL_MS });

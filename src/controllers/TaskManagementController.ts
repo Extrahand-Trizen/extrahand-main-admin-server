@@ -24,6 +24,9 @@ import {
 } from '../services/TaskAssignmentService';
 import { TaskAssignment } from '../models/TaskAssignment';
 import { userServiceClient } from '../services/UserServiceClient';
+import { sendTaskPostedEmail } from '../services/TaskPostedEmailService';
+import { getTaskPostedEmailSettings, isPhoneExcluded } from '../services/TaskPostedEmailSettingsService';
+import { TaskPostedEmailAttempt } from '../models/TaskPostedEmailAttempt';
 
 type UpstreamPagination = {
   page?: number;
@@ -106,16 +109,54 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
       const existingAssignment = await TaskAssignment.findOne({ taskId })
         .select('taskId')
         .lean();
-      if (existingAssignment) continue;
 
       const existingNotification = await AdminNotification.findOne({
         type: 'task_posted',
         dashboardType: DashboardType.MAIN_ADMIN,
         'metadata.taskId': taskId,
       })
-        .select('_id')
+        .select('_id metadata')
         .lean();
-      if (existingNotification) continue;
+      if (existingNotification) {
+        if (!(existingNotification.metadata as any)?.taskPostedEmailSentAt) {
+          const requesterId = normalizeTaskIdForAssignment(
+            task.CustomerId || task.customerId || task.requesterId,
+          );
+          let customerName: string | undefined;
+          if (requesterId) {
+            try {
+              const profileBatch = await userServiceClient.getProfilesBatch([requesterId]);
+              const profile = Array.isArray(profileBatch?.profiles)
+                ? profileBatch.profiles[0]
+                : undefined;
+              customerName = profile?.name || profile?.fullName;
+            } catch (profileError: any) {
+              logger.warn('[TaskPostedEmail][main-admin-server] Customer profile lookup failed during retry', {
+                taskId,
+                requesterId,
+                error: profileError?.message || String(profileError),
+              });
+            }
+          }
+          const emailSent = await sendTaskPostedEmail({
+            taskId,
+            taskTitle: task.title,
+            userName: customerName || task.userName || task.customerName || task.requesterName,
+          });
+          if (emailSent) {
+            await AdminNotification.updateOne(
+              { _id: existingNotification._id },
+              { $set: { 'metadata.taskPostedEmailSentAt': new Date() } },
+            );
+            logger.info('[TaskPostedEmail][main-admin-server] Repaired missing work-posted email', {
+              taskId,
+              taskTitle: task.title,
+            });
+          }
+        }
+        continue;
+      }
+      if (existingAssignment) continue;
 
       const result = await createTaskPostedAdminNotification({
         taskId,
@@ -452,6 +493,64 @@ export class TaskManagementController {
         success: false,
         error: error.response?.data?.error || 'Failed to get task',
       });
+    }
+  }
+
+  /**
+   * POST /api/v1/tasks/:taskId/send-email
+   * Manually send the configured work-posted email recipients an alert.
+   */
+  static async sendTaskPostedEmail(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+      const result = await taskServiceClient.getTask(taskId);
+      const task = result?.data || result;
+      const requesterId = normalizeTaskIdForAssignment(
+        task?.CustomerId || task?.customerId || task?.requesterId,
+      );
+      let profile: any = null;
+
+      if (requesterId) {
+        const profileBatch = await userServiceClient.getProfilesBatch([requesterId]);
+        profile = Array.isArray(profileBatch?.profiles) ? profileBatch.profiles[0] : null;
+      }
+
+      const settings = await getTaskPostedEmailSettings();
+      if (isPhoneExcluded(profile?.phone, settings.excludedPhones)) {
+        logger.info('[TaskPostedEmail][main-admin-server] Manual email skipped for excluded customer phone', {
+          taskId,
+        });
+        res.json({ success: true, sent: false, skipped: true, reason: 'excluded_customer_phone' });
+        return;
+      }
+
+      const sent = await sendTaskPostedEmail({
+        taskId,
+        taskTitle: task?.title,
+        userName: profile?.name || profile?.fullName,
+        userPhone: profile?.phone,
+      });
+
+      res.json({ success: sent, sent, skipped: !sent });
+    } catch (error: any) {
+      logger.error('Manual task-posted email error', {
+        taskId: req.params.taskId,
+        error: error?.message || String(error),
+      });
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to send task-posted email',
+      });
+    }
+  }
+
+  static async getTaskPostedEmailStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const status = await TaskPostedEmailAttempt.findOne({ taskId: req.params.taskId }).lean();
+      res.json({ success: true, data: status || null });
+    } catch (error: any) {
+      logger.error('Get task-posted email status error', { taskId: req.params.taskId, error: error?.message });
+      res.status(500).json({ success: false, error: 'Failed to load email status' });
     }
   }
   

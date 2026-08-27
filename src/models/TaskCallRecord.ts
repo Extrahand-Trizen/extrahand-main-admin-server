@@ -18,11 +18,18 @@ export interface TaskCallNote {
   createdAt: Date;
 }
 
+export interface TaskCallAttempt {
+  attemptedAt: Date;
+  outcome: TaskCallStatus;
+  nextRetryAt?: Date | null;
+}
+
 export interface TaskCallRecordDocument extends Document {
   taskId: string;
   notificationId?: string;
   status: TaskCallStatus;
   followUpDate?: Date | null;
+  callAttempts: TaskCallAttempt[];
   notes: TaskCallNote[];
   lastUpdatedBy?: {
     userId: string;
@@ -51,6 +58,19 @@ const TaskCallNoteSchema = new Schema<TaskCallNote>(
   { _id: false },
 );
 
+const TaskCallAttemptSchema = new Schema<TaskCallAttempt>(
+  {
+    attemptedAt: { type: Date, required: true, default: Date.now },
+    outcome: {
+      type: String,
+      enum: ['not_updated', 'genuine', 'not_genuine', 'call_not_lifted', 'follow_up', 'completed'],
+      required: true,
+    },
+    nextRetryAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const TaskCallRecordSchema = new Schema<TaskCallRecordDocument>(
   {
     taskId: { type: String, required: true, unique: true, index: true },
@@ -62,6 +82,7 @@ const TaskCallRecordSchema = new Schema<TaskCallRecordDocument>(
       required: true,
     },
     followUpDate: { type: Date, default: null },
+    callAttempts: { type: [TaskCallAttemptSchema], default: [] },
     notes: { type: [TaskCallNoteSchema], default: [] },
     lastUpdatedBy: { type: AdminActorSchema },
   },

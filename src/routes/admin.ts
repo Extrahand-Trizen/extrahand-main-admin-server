@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AdminUserController } from '../controllers/AdminUserController';
 import { InviteController } from '../controllers/InviteController';
 import { verifyAuth, requireSuperAdmin } from '../middleware/auth';
+import { TaskPostedEmailSettingsController } from '../controllers/TaskPostedEmailSettingsController';
 
 const router = Router();
 
@@ -18,6 +19,8 @@ router.delete('/users/:userId', requireSuperAdmin, AdminUserController.deleteAdm
 router.post('/users/:userId/transfer-and-delete', requireSuperAdmin, AdminUserController.transferAndDeleteAdminUser);
 router.post('/users/:userId/dashboard-access', requireSuperAdmin, AdminUserController.addDashboardAccess);
 router.delete('/users/:userId/dashboard-access/:dashboardType', requireSuperAdmin, AdminUserController.removeDashboardAccess);
+router.get('/settings/task-posted-email', requireSuperAdmin, TaskPostedEmailSettingsController.get);
+router.put('/settings/task-posted-email', requireSuperAdmin, TaskPostedEmailSettingsController.update);
 
 // Invite management (Super Admin only)
 router.post('/invites', requireSuperAdmin, InviteController.createInvite);

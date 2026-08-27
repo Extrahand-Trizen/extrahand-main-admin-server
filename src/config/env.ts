@@ -34,6 +34,7 @@ const envSchema = z.object({
   ADMIN_DASHBOARD_URL: z.string().url().default('http://localhost:3000'),
   MAIN_ADMIN_DASHBOARD_URL: z.string().url().default('http://localhost:3001'),
   SUPER_ADMIN_DASHBOARD_URL: z.string().url().default('http://localhost:3002'),
+  OPERATIONS_PORTAL_URL: z.string().url().default('http://localhost:3003'),
   
   // External Services
   USER_SERVICE_URL: z.string().url().optional(),

@@ -36,12 +36,14 @@
     "JWT_REFRESH_EXPIRY": "7d",
     "ADMIN_DASHBOARD_URL": "http://localhost:3000",
     "MAIN_ADMIN_DASHBOARD_URL": "http://localhost:3001",
+    "OPERATIONS_PORTAL_URL": "https://operations.extrahand.in",
     "SUPER_ADMIN_DASHBOARD_URL": "http://localhost:3002",
     "USER_SERVICE_URL": "http://srv-captain--extrahand-user-service:4001",
     "ONBOARDING_SERVICE_URL": "http://srv-captain--extrahand-admin-service:4008",
     "TASK_SERVICE_URL": "http://srv-captain--extrahand-task-service:4002",
     "SUPPORT_SERVICE_URL": "http://srv-captain--extrahand-platform-support-service:5002",
-    "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE"
+    "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE",
+    "EMAIL_SERVICE_URL": "https://extrahand-email-service.apps.extrahand.in"
   },
   "volumes": [
     {

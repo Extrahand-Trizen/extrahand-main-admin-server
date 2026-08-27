@@ -65,6 +65,18 @@ router.get(
   TaskManagementController.getTask
 );
 
+router.post(
+  '/:taskId/send-email',
+  requirePermission(`${Resource.TASK}.${Action.VIEW}`),
+  TaskManagementController.sendTaskPostedEmail
+);
+
+router.get(
+  '/:taskId/email-status',
+  requirePermission(`${Resource.TASK}.${Action.VIEW}`),
+  TaskManagementController.getTaskPostedEmailStatus
+);
+
 router.patch(
   '/:taskId',
   requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
