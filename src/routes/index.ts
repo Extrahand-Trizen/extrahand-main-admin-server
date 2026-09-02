@@ -14,6 +14,7 @@ import taskCallRoutes from './taskCalls';
 import kycReviewRoutes from './kycReviews';
 import aadhaarFollowUpRoutes from './aadhaarFollowUps';
 import bookNowRoutes from './bookNow';
+import qcommerceRoutes from './qcommerce';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.use(`${API_PREFIX}/task-calls`, taskCallRoutes);
 router.use(`${API_PREFIX}/kyc-reviews`, kycReviewRoutes);
 router.use(`${API_PREFIX}/aadhaar-followups`, aadhaarFollowUpRoutes);
 router.use(`${API_PREFIX}/book-now`, bookNowRoutes);
+router.use(`${API_PREFIX}/qcommerce`, qcommerceRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

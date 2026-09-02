@@ -33,6 +33,9 @@ export enum Resource {
 
   // Payments
   PAYMENT = 'payment',
+
+  // Qcommerce
+  QCOMMERCE = 'qcommerce',
 }
 
 export enum Action {
@@ -124,6 +127,13 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     // Payments
     `${Resource.PAYMENT}.${Action.VIEW}`,
     `${Resource.PAYMENT}.${Action.LIST}`,
+
+    // Qcommerce
+    `${Resource.QCOMMERCE}.${Action.VIEW}`,
+    `${Resource.QCOMMERCE}.${Action.LIST}`,
+    `${Resource.QCOMMERCE}.${Action.SEARCH}`,
+    `${Resource.QCOMMERCE}.${Action.UPDATE}`,
+    `${Resource.QCOMMERCE}.${Action.ASSIGN}`,
   ],
   
   operations: [
@@ -145,6 +155,13 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
+
+    // Qcommerce
+    `${Resource.QCOMMERCE}.${Action.VIEW}`,
+    `${Resource.QCOMMERCE}.${Action.LIST}`,
+    `${Resource.QCOMMERCE}.${Action.SEARCH}`,
+    `${Resource.QCOMMERCE}.${Action.UPDATE}`,
+    `${Resource.QCOMMERCE}.${Action.ASSIGN}`,
   ],
 
   // Invite flow role aliases
@@ -174,6 +191,13 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.PAYOUT}.${Action.LIST}`,
     `${Resource.PAYOUT}.${Action.VIEW}`,
     `${Resource.PAYOUT}.${Action.UPDATE}`,
+
+    // Qcommerce
+    `${Resource.QCOMMERCE}.${Action.VIEW}`,
+    `${Resource.QCOMMERCE}.${Action.LIST}`,
+    `${Resource.QCOMMERCE}.${Action.SEARCH}`,
+    `${Resource.QCOMMERCE}.${Action.UPDATE}`,
+    `${Resource.QCOMMERCE}.${Action.ASSIGN}`,
   ],
   
   support: [
