@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import logger from '../config/logger';
 import { QcOrder } from '../models/QcOrder';
 import { QcCategory, QcSubcategory, QcSellerOnboarding } from '../models/QcCatalogueModels';
+import { qcommerceServiceClient } from '../services/QcommerceServiceClient';
 
 const DEFAULT_SAMPLE_ORDERS = [
   {
@@ -272,110 +274,7 @@ export class QcommerceOrderController {
    */
   static async listOrders(req: Request, res: Response): Promise<void> {
     try {
-      await ensureInitialData();
-
-      const search = String(req.query.search || '').trim();
-      const status = String(req.query.status || 'all').trim();
-      const shop = String(req.query.shop || 'all').trim();
-      const category = String(req.query.category || 'all').trim();
-      const subcategory = String(req.query.subcategory || 'all').trim();
-      const assignedTo = String(req.query.assignedTo || 'all').trim();
-      const deadlineSortOrder = String(req.query.deadlineSortOrder || req.query.sortOrder || 'desc').trim();
-      const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
-      const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '20'), 10)));
-
-      const filter: Record<string, any> = {};
-
-      if (search) {
-        const searchRegex = { $regex: search, $options: 'i' };
-        filter.$or = [
-          { orderNumber: searchRegex },
-          { shopName: searchRegex },
-          { 'address.name': searchRegex },
-          { 'address.phone': searchRegex },
-          { 'address.line1': searchRegex },
-          { 'assignedTo.name': searchRegex },
-          { 'opsAdmin.name': searchRegex },
-        ];
-      }
-
-      if (status && status !== 'all') {
-        filter.status = status;
-      }
-
-      if (shop && shop !== 'all') {
-        filter.shopName = { $regex: `^${shop}$`, $options: 'i' };
-      }
-
-      if (category && category !== 'all') {
-        filter.$or = [
-          { shopCategory: { $regex: `^${category}$`, $options: 'i' } },
-          { 'items.productSlug': { $regex: category, $options: 'i' } },
-        ];
-      }
-
-      if (subcategory && subcategory !== 'all') {
-        filter.shopSubcategory = { $regex: `^${subcategory}$`, $options: 'i' };
-      }
-
-      if (assignedTo && assignedTo !== 'all') {
-        if (assignedTo === 'unassigned') {
-          filter.$or = [
-            { 'assignedTo.name': { $exists: false } },
-            { 'assignedTo.name': null },
-            { 'assignedTo.name': '' },
-          ];
-        } else {
-          filter.$or = [
-            { 'assignedTo.name': { $regex: assignedTo, $options: 'i' } },
-            { 'opsAdmin.name': { $regex: assignedTo, $options: 'i' } },
-          ];
-        }
-      }
-
-      const sortDir = deadlineSortOrder === 'asc' ? 1 : -1;
-      const sort: Record<string, 1 | -1> = {
-        deadline: sortDir,
-        createdAt: -1,
-      };
-
-      const [total, rawOrders] = await Promise.all([
-        QcOrder.countDocuments(filter),
-        QcOrder.find(filter)
-          .sort(sort)
-          .skip((page - 1) * limit)
-          .limit(limit)
-          .lean(),
-      ]);
-
-      const orders = rawOrders.map((order: any) => {
-        const amount =
-          typeof order.amount === 'number'
-            ? order.amount
-            : (order.amountPaise || 0) / 100;
-
-        return {
-          ...order,
-          id: String(order._id),
-          amount,
-          amountPaise: order.amountPaise || Math.round(amount * 100),
-          status: order.status || 'open',
-          shopName: order.shopName || 'Shop',
-          opsAdminName: order.opsAdmin?.name || 'Durgamshiva',
-          assignedHelperName: order.assignedTo?.name || null,
-        };
-      });
-
-      res.json({
-        success: true,
-        data: orders,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit) || 1,
-        },
-      });
+      res.json(await qcommerceServiceClient.listOrders(req.query as Record<string, string>));
     } catch (error: any) {
       logger.error('Failed to list Qcommerce orders:', error);
       res.status(500).json({
@@ -390,33 +289,7 @@ export class QcommerceOrderController {
    */
   static async getOrder(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const order = await QcOrder.findOne({
-        $or: [
-          { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null },
-          { orderNumber: id },
-          { orderNumber: id.startsWith('#') ? id : `#${id}` },
-        ].filter(Boolean),
-      }).lean();
-
-      if (!order) {
-        res.status(404).json({ success: false, error: 'Order not found' });
-        return;
-      }
-
-      const amount =
-        typeof order.amount === 'number'
-          ? order.amount
-          : (order.amountPaise || 0) / 100;
-
-      res.json({
-        success: true,
-        data: {
-          ...order,
-          id: String(order._id),
-          amount,
-        },
-      });
+      res.json(await qcommerceServiceClient.getOrder(req.params.id));
     } catch (error: any) {
       logger.error('Failed to get Qcommerce order:', error);
       res.status(500).json({
@@ -431,47 +304,19 @@ export class QcommerceOrderController {
    */
   static async assignHelper(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
       const { helperUid, helperProfileId, helperName, helperPhone, role = 'helper' } = req.body;
 
       if (!helperUid && !helperProfileId && !helperName) {
         res.status(400).json({ success: false, error: 'Helper details are required' });
         return;
       }
-
-      const order = await QcOrder.findOne({
-        $or: [
-          { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null },
-          { orderNumber: id },
-          { orderNumber: id.startsWith('#') ? id : `#${id}` },
-        ].filter(Boolean),
-      });
-
-      if (!order) {
-        res.status(404).json({ success: false, error: 'Order not found' });
-        return;
-      }
-
-      order.assignedTo = {
-        userId: helperUid || order.assignedTo?.userId,
-        profileId: helperProfileId || order.assignedTo?.profileId,
-        name: helperName || order.assignedTo?.name,
-        phone: helperPhone || order.assignedTo?.phone,
+      res.json(await qcommerceServiceClient.assignHelper(req.params.id, {
+        helperUid,
+        helperProfileId,
+        helperName,
+        helperPhone,
         role,
-        assignedAt: new Date(),
-      };
-
-      if (order.status === 'open') {
-        order.status = 'assigned';
-      }
-
-      await order.save();
-
-      res.json({
-        success: true,
-        data: order,
-        message: `Helper ${helperName || ''} assigned successfully`,
-      });
+      }));
     } catch (error: any) {
       logger.error('Failed to assign helper to Qcommerce order:', error);
       res.status(500).json({
@@ -486,35 +331,13 @@ export class QcommerceOrderController {
    */
   static async updateOrderStatus(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
       const { status } = req.body;
 
       if (!status) {
         res.status(400).json({ success: false, error: 'Status is required' });
         return;
       }
-
-      const order = await QcOrder.findOne({
-        $or: [
-          { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null },
-          { orderNumber: id },
-          { orderNumber: id.startsWith('#') ? id : `#${id}` },
-        ].filter(Boolean),
-      });
-
-      if (!order) {
-        res.status(404).json({ success: false, error: 'Order not found' });
-        return;
-      }
-
-      order.status = status;
-      await order.save();
-
-      res.json({
-        success: true,
-        data: order,
-        message: 'Order status updated successfully',
-      });
+      res.json(await qcommerceServiceClient.updateStatus(req.params.id, status));
     } catch (error: any) {
       logger.error('Failed to update Qcommerce order status:', error);
       res.status(500).json({
