@@ -15,6 +15,7 @@ import kycReviewRoutes from './kycReviews';
 import aadhaarFollowUpRoutes from './aadhaarFollowUps';
 import bookNowRoutes from './bookNow';
 import qcommerceRoutes from './qcommerce';
+import assignmentManagementRoutes from './assignmentManagement';
 
 const router = Router();
 
@@ -38,6 +39,7 @@ router.use(`${API_PREFIX}/kyc-reviews`, kycReviewRoutes);
 router.use(`${API_PREFIX}/aadhaar-followups`, aadhaarFollowUpRoutes);
 router.use(`${API_PREFIX}/book-now`, bookNowRoutes);
 router.use(`${API_PREFIX}/qcommerce`, qcommerceRoutes);
+router.use(`${API_PREFIX}/assignment-management`, assignmentManagementRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
