@@ -49,13 +49,27 @@ export class TaskServiceClient {
   }
   
   /**
-   * Get task by ID
+   * Evict a task (and any batch that contains it) from the local in-process cache.
+   * Call this after any mutation that changes assignment state so the next
+   * getTask() call fetches fresh data instead of serving stale cached results.
+   */
+  invalidateTaskCache(taskId: string): void {
+    taskCache.delete(taskId);
+    // Also evict any batch cache entries that may include this task
+    for (const key of taskCache.keys()) {
+      if (key.startsWith('batch:') && key.includes(taskId)) {
+        taskCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Get task by ID — always fetches fresh from task service, no in-process cache.
+   * Caching was removed because a 60-second TTL caused stale assignment state
+   * (assigned/unassigned) to be served on page reload.
    */
   async getTask(taskId: string): Promise<any> {
-    const cached = taskCache.get(taskId);
-    if (cached && cached.expiry > Date.now()) return cached.data;
     const response = await this.client.get(`/api/v1/tasks/${taskId}`);
-    taskCache.set(taskId, { data: response.data, expiry: Date.now() + TASK_CACHE_TTL_MS });
     return response.data;
   }
 
@@ -253,6 +267,8 @@ export class TaskServiceClient {
       headers['X-User-Id'] = adminUserId;
     }
     const response = await this.client.post('/api/v1/admin/assignments/unassign', params, { headers });
+    // Invalidate cache so the next getTask() returns fresh (unassigned) data
+    this.invalidateTaskCache(params.taskId);
     return response.data;
   }
 
@@ -270,6 +286,8 @@ export class TaskServiceClient {
       headers['X-User-Id'] = adminUserId;
     }
     const response = await this.client.post('/api/v1/admin/assignments/assign-direct', params, { headers });
+    // Invalidate cache so the next getTask() returns fresh (assigned) data
+    this.invalidateTaskCache(params.taskId);
     return response.data;
   }
 
@@ -288,6 +306,8 @@ export class TaskServiceClient {
       headers['X-User-Id'] = adminUserId;
     }
     const response = await this.client.post('/api/v1/admin/assignments/assign-partner-direct', params, { headers });
+    // Invalidate cache so the next getTask() returns fresh (partner-assigned) data
+    this.invalidateTaskCache(params.taskId);
     return response.data;
   }
 

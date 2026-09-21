@@ -55,12 +55,19 @@ function normalizeTask(task: any): any {
     typeof task?.budget === 'number'
       ? task.budget
       : Number(task?.budget?.amount ?? task?.budgetValue ?? 0);
+  const persistedAssigneeId =
+    task?.assigneeId || task?.assigneeUid || task?.partnerId || task?.partnerUid || null;
+  const persistedAssigneeName =
+    task?.assignedHelperName || task?.assigneeName || task?.assignedToName || null;
 
   return {
     ...task,
     taskId: normalizeTaskIdForAssignment(task?.taskId ?? task?._id ?? task?.id),
     CustomerId: task?.CustomerId || task?.requesterId,
     budget: Number.isFinite(normalizedBudget) ? normalizedBudget : 0,
+    assigneeId: persistedAssigneeId,
+    assigneeName: persistedAssigneeName,
+    assignedHelperName: persistedAssigneeName,
   };
 }
 
@@ -479,9 +486,32 @@ export class TaskManagementController {
       
       const result = await taskServiceClient.getTask(taskId);
       const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
-      let [enrichedTask] = await enrichTasksWithTaskCallStatus([normalizedTask]);
-      [enrichedTask] = await enrichTasksWithAssignedTo([enrichedTask]);
-      [enrichedTask] = await enrichTasksWithAssigneeName([enrichedTask]);
+
+      // Run all three enrichment operations in parallel — they are independent of each other.
+      // Previously they ran sequentially which caused 10+ second load times because each
+      // awaited the previous (DB query → admin-service DB query → user-service HTTP call).
+      const [withCallStatus, withAssignedTo, withAssigneeName] = await Promise.all([
+        enrichTasksWithTaskCallStatus([normalizedTask]),
+        enrichTasksWithAssignedTo([normalizedTask]),
+        enrichTasksWithAssigneeName([normalizedTask]),
+      ]);
+
+      // Merge only the fields each enrichment adds, keeping normalizedTask as the base
+      // so that assignment fields (assigneeId, assigneeName, etc.) are never overwritten
+      // by a stale enrichment result.
+      const enrichedTask = {
+        ...normalizedTask,
+        // from enrichTasksWithTaskCallStatus
+        taskCallStatus: withCallStatus[0]?.taskCallStatus,
+        taskCallFollowUpDate: withCallStatus[0]?.taskCallFollowUpDate,
+        taskCallUpdatedAt: withCallStatus[0]?.taskCallUpdatedAt,
+        // from enrichTasksWithAssignedTo (CRM admin assignment, not helper)
+        assignedTo: withAssignedTo[0]?.assignedTo,
+        // from enrichTasksWithAssigneeName (resolved display name for helper)
+        ...(withAssigneeName[0]?.assigneeName != null
+          ? { assigneeName: withAssigneeName[0].assigneeName }
+          : {}),
+      };
       
       res.json({
         success: true,
@@ -825,6 +855,9 @@ export class TaskManagementController {
           taskId,
           { helperUid, helperProfileId, orderId }
         );
+
+        // Invalidate cache so next getTask() returns fresh (assigned) data
+        taskServiceClient.invalidateTaskCache(taskId);
 
         res.json({ success: true, data: result.data || result });
       } else {
