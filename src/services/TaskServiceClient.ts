@@ -128,6 +128,8 @@ export class TaskServiceClient {
     CustomerId?: string;
     assigneeId?: string;
     bookingSource?: string;
+    scheduledDateFrom?: string;
+    scheduledDateTo?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<any> {

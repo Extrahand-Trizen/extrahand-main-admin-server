@@ -314,6 +314,8 @@ export class TaskManagementController {
         // Pass bookingSource directly to task service so it filters at DB level
         // (bypasses the marketplace-only clause for book_now / posted_task)
         bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : undefined,
+        scheduledDateFrom: req.query.scheduledDateFrom as string,
+        scheduledDateTo: req.query.scheduledDateTo as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
@@ -337,6 +339,8 @@ export class TaskManagementController {
           CustomerId: params.CustomerId,
           assigneeId: params.assigneeId,
           bookingSource: params.bookingSource,
+          scheduledDateFrom: params.scheduledDateFrom,
+          scheduledDateTo: params.scheduledDateTo,
           sortBy: params.sortBy,
           sortOrder: params.sortOrder,
         };
