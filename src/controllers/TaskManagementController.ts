@@ -23,6 +23,7 @@ import {
   taskMatchesAssigneeFilter,
 } from '../services/TaskAssignmentService';
 import { TaskAssignment } from '../models/TaskAssignment';
+import { BookingOrder } from '../models/BookingOrder';
 import { userServiceClient } from '../services/UserServiceClient';
 import { sendTaskPostedEmail } from '../services/TaskPostedEmailService';
 import { getTaskPostedEmailSettings, isPhoneExcluded } from '../services/TaskPostedEmailSettingsService';
@@ -51,10 +52,16 @@ function extractPagination(payload: any): { page: number; limit: number; total: 
 }
 
 function normalizeTask(task: any): any {
+  const rawBudget = task?.budget;
   const normalizedBudget =
-    typeof task?.budget === 'number'
-      ? task.budget
-      : Number(task?.budget?.amount ?? task?.budgetValue ?? 0);
+    typeof rawBudget === 'number'
+      ? rawBudget
+      : Number(rawBudget?.amount ?? task?.budgetValue ?? 0);
+  // Preserve budget type ('hourly' | 'fixed') for payment-type filtering
+  const budgetType: string =
+    typeof rawBudget === 'object' && rawBudget !== null
+      ? (rawBudget.type as string) || 'fixed'
+      : 'fixed';
   const persistedAssigneeId =
     task?.assigneeId || task?.assigneeUid || task?.partnerId || task?.partnerUid || null;
   const persistedAssigneeName =
@@ -65,6 +72,7 @@ function normalizeTask(task: any): any {
     taskId: normalizeTaskIdForAssignment(task?.taskId ?? task?._id ?? task?.id),
     CustomerId: task?.CustomerId || task?.requesterId,
     budget: Number.isFinite(normalizedBudget) ? normalizedBudget : 0,
+    budgetType,
     assigneeId: persistedAssigneeId,
     assigneeName: persistedAssigneeName,
     assignedHelperName: persistedAssigneeName,
@@ -220,6 +228,85 @@ async function enrichTasksWithAssigneeName(tasks: any[]): Promise<any[]> {
   }
 }
 
+export function isHourlyTask(task: any): boolean {
+  const slug = String(task?.categorySlug || '').trim().toLowerCase();
+  const cat = String(task?.category || '').trim().toLowerCase();
+  const label = String(task?.categoryLabel || '').trim().toLowerCase();
+  const title = String(task?.title || '').trim().toLowerCase();
+  const bType = String(task?.budgetType || task?.budget?.type || '').trim().toLowerCase();
+  const hourlyFlag = Boolean(task?.hourlyHelper);
+  return (
+    slug === 'hourly-helper' ||
+    slug === 'hourly-based' ||
+    cat === 'hourly-helper' ||
+    cat === 'hourly-based' ||
+    label === 'hourly based' ||
+    label === 'hourly helper' ||
+    title.startsWith('helper ·') ||
+    title.startsWith('helper -') ||
+    title.includes('helper') ||
+    bType === 'hourly' ||
+    hourlyFlag
+  );
+}
+
+async function enrichTasksWithPaymentInfo(tasks: any[]): Promise<any[]> {
+  const orderIds = Array.from(
+    new Set(
+      tasks
+        .map((t) => String(t?.bookingOrderId || '').trim())
+        .filter(Boolean),
+    ),
+  );
+
+  let orderMap = new Map<string, any>();
+  if (orderIds.length > 0) {
+    try {
+      const orders = await BookingOrder.find({ orderId: { $in: orderIds } })
+        .select('orderId total totalAfterCoupon couponCode couponDiscount')
+        .lean();
+      orderMap = new Map(orders.map((o: any) => [String(o.orderId), o]));
+    } catch (err) {
+      logger.warn('Failed to load booking orders for payment enrichment:', err);
+    }
+  }
+
+  return tasks.map((task) => {
+    const isHourly = isHourlyTask(task);
+    const orderId = task?.bookingOrderId ? String(task.bookingOrderId) : null;
+    const order = orderId ? orderMap.get(orderId) : null;
+
+    let paymentAmount: number;
+    let isFreeCoupon = false;
+
+    if (order) {
+      const effectiveTotal =
+        typeof order.totalAfterCoupon === 'number'
+          ? order.totalAfterCoupon
+          : Number(order.total ?? 0);
+      paymentAmount = Number.isFinite(effectiveTotal) ? effectiveTotal : 0;
+
+      // "it should check the payment amount for that task if it is 0 it will comes under the free coupon for hourly based only"
+      if (isHourly && (paymentAmount === 0 || order.total === 0)) {
+        isFreeCoupon = true;
+        paymentAmount = 0;
+      }
+    } else {
+      paymentAmount = Number(task?.budget ?? 0);
+    }
+
+    return {
+      ...task,
+      isHourly,
+      paymentAmount,
+      isFreeCoupon,
+      couponCode: order?.couponCode || null,
+      couponDiscount: order?.couponDiscount || null,
+      paymentType: isFreeCoupon ? 'free_coupon' : 'paid',
+    };
+  });
+}
+
 async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise<any[]> {
   const maxTasks = 1000;
   const upstreamLimit = 50;
@@ -288,6 +375,7 @@ export class TaskManagementController {
       const assignedToParam = String(req.query.assignedTo || '').trim();
       const requestedStatus = String(req.query.status || '').trim();
       const bookingSource = String(req.query.bookingSource || '').trim();
+      const paymentType = String(req.query.paymentType || '').trim(); // 'paid' | 'free_coupon' | ''
       const isOverdueFilter = requestedStatus === 'overdue';
 
       const assigneeFilter =
@@ -320,12 +408,13 @@ export class TaskManagementController {
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
       };
 
-      // We need local filtering if: overdue filter, followUpStatus filter, or assignee filter
+      // We need local filtering if: overdue filter, followUpStatus filter, assignee filter, or paymentType filter
       // bookingSource is now handled upstream by the task service
       const needsLocalFilter =
         isOverdueFilter ||
         (followUpStatus && followUpStatus !== 'all') ||
-        Boolean(assigneeFilter);
+        Boolean(assigneeFilter) ||
+        (paymentType && paymentType !== 'all');
 
       if (needsLocalFilter) {
         const requestedPage = params.page || 1;
@@ -354,6 +443,7 @@ export class TaskManagementController {
         let enrichedTasks = await enrichTasksWithTaskCallStatus(allTasks);
         enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
         enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
+        enrichedTasks = await enrichTasksWithPaymentInfo(enrichedTasks);
 
         // Apply overdue filter: open tasks whose scheduledDate has passed (and not flexible)
         if (isOverdueFilter) {
@@ -394,6 +484,21 @@ export class TaskManagementController {
           );
         }
 
+        // Apply paymentType filter:
+        // 'free_coupon' = hourly task with payment amount === 0 (fully covered by coupon)
+        // 'paid'        = tasks that are paid (not free coupon)
+        if (paymentType && paymentType !== 'all') {
+          enrichedTasks = enrichedTasks.filter((task) => {
+            if (paymentType === 'free_coupon') {
+              return task.isFreeCoupon === true;
+            }
+            if (paymentType === 'paid') {
+              return task.isFreeCoupon !== true;
+            }
+            return true;
+          });
+        }
+
         const start = (requestedPage - 1) * requestedLimit;
         res.json({
           success: true,
@@ -415,6 +520,7 @@ export class TaskManagementController {
       let enrichedTasks = await enrichTasksWithTaskCallStatus(tasks);
       enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
       enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
+      enrichedTasks = await enrichTasksWithPaymentInfo(enrichedTasks);
 
       // When filtering by 'open', exclude tasks whose deadline has already passed
       // (overdue tasks should only appear when 'overdue' filter is selected)
