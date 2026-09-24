@@ -388,7 +388,9 @@ export class TaskManagementController {
 
       // For overdue, we query open tasks from task service and filter by deadline on our side
       // For open, we exclude overdue tasks (those with past scheduledDate and non-flexible dateOption)
-      const upstreamStatus = isOverdueFilter ? 'open' : requestedStatus;
+      const upstreamStatus = isOverdueFilter
+        ? 'open'
+        : (requestedStatus && requestedStatus !== 'all' ? requestedStatus : undefined);
 
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
@@ -396,12 +398,12 @@ export class TaskManagementController {
         search: req.query.search as string,
         status: upstreamStatus,
         excludeOverdue: requestedStatus === 'open' ? 'true' : undefined,
-        category: req.query.category as string,
+        category: req.query.category && req.query.category !== 'all' ? (req.query.category as string) : undefined,
         CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
-        // Pass bookingSource directly to task service so it filters at DB level
-        // (bypasses the marketplace-only clause for book_now / posted_task)
-        bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : undefined,
+        // Pass bookingSource to task service. When 'all' or empty, pass 'all'
+        // so task service returns both book_now and posted_task works.
+        bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : 'all',
         scheduledDateFrom: req.query.scheduledDateFrom as string,
         scheduledDateTo: req.query.scheduledDateTo as string,
         sortBy: req.query.sortBy as string,
