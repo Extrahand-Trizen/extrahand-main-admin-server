@@ -444,6 +444,7 @@ export class TaskManagementController {
         enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
         enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
         enrichedTasks = await enrichTasksWithPaymentInfo(enrichedTasks);
+        enrichedTasks = enrichedTasks.filter((t) => !t.isDeletedByCustomer && !t.isDeletedBySupport);
 
         // Apply overdue filter: open tasks whose scheduledDate has passed (and not flexible)
         if (isOverdueFilter) {
@@ -521,6 +522,7 @@ export class TaskManagementController {
       enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
       enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
       enrichedTasks = await enrichTasksWithPaymentInfo(enrichedTasks);
+      enrichedTasks = enrichedTasks.filter((t) => !t.isDeletedByCustomer && !t.isDeletedBySupport);
 
       // When filtering by 'open', exclude tasks whose deadline has already passed
       // (overdue tasks should only appear when 'overdue' filter is selected)
@@ -750,22 +752,7 @@ export class TaskManagementController {
         return;
       }
 
-      const taskPayload = await taskServiceClient.getTask(taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(
-        rawTask?.CustomerId || rawTask?.requesterId || '',
-      ).trim();
-      if (!rawTask || !requesterProfileId) {
-        res.status(404).json({
-          success: false,
-          error: 'Task not found or missing requester for delete',
-        });
-        return;
-      }
-
-      const result = await taskServiceClient.deleteTask(taskId, reason.trim(), {
-        requesterProfileId,
-      });
+      const result = await taskServiceClient.deleteTask(taskId, reason.trim());
       
       await createAuditLog(
         req,
@@ -1135,19 +1122,8 @@ export class TaskManagementController {
         return;
       }
 
-      // Perform the delete using the existing deleteTask logic requirements.
-      // We must impersonate requester profile so task-service authZ passes.
-      const taskPayload = await taskServiceClient.getTask(requestDoc.taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
-      if (!requesterProfileId) {
-        res.status(400).json({ success: false, error: 'Task requester profile missing; cannot delete' });
-        return;
-      }
-
-      await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason, {
-        requesterProfileId,
-      });
+      // Perform the delete using admin privileges (task-service bypasses requester check for main-admin-service)
+      await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason);
 
       requestDoc.status = 'approved';
       requestDoc.decidedBy = {
@@ -1426,15 +1402,7 @@ export class TaskManagementController {
     try {
       const { taskId } = req.params;
 
-      const taskPayload = await taskServiceClient.getTask(taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
-      if (!requesterProfileId) {
-        res.status(404).json({ success: false, error: 'Task not found or missing requester for restore' });
-        return;
-      }
-
-      const result = await taskServiceClient.restoreTask(taskId, { requesterProfileId });
+      const result = await taskServiceClient.restoreTask(taskId);
 
       await createAuditLog(
         req,
@@ -1471,20 +1439,7 @@ export class TaskManagementController {
       const { taskId } = req.params;
       const reason = typeof req.body?.reason === 'string' ? String(req.body.reason).trim() : '';
 
-      const taskPayload = await taskServiceClient.getTask(taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
-      if (!requesterProfileId) {
-        res.status(404).json({
-          success: false,
-          error: 'Task not found or missing requester for permanent delete',
-        });
-        return;
-      }
-
-      const result = await taskServiceClient.permanentlyDeleteTask(taskId, {
-        requesterProfileId,
-      });
+      const result = await taskServiceClient.permanentlyDeleteTask(taskId, reason ? { reason } : undefined);
 
       await createAuditLog(
         req,

@@ -154,20 +154,11 @@ export class TaskServiceClient {
   }
   
   /**
-   * Delete task (admin impersonates requester via X-Profile-Id so task-service authZ passes)
+   * Delete task (admin call — task-service detects X-Service-Name: main-admin-service and bypasses requester check)
    */
-  async deleteTask(
-    taskId: string,
-    reason: string,
-    opts?: { requesterProfileId?: string },
-  ): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (opts?.requesterProfileId) {
-      headers['X-Profile-Id'] = opts.requesterProfileId;
-    }
+  async deleteTask(taskId: string, reason: string): Promise<any> {
     const response = await this.client.delete(`/api/v1/tasks/${taskId}`, {
       data: { reason },
-      headers,
     });
     return response.data;
   }
@@ -177,25 +168,14 @@ export class TaskServiceClient {
     return response.data;
   }
 
-  async restoreTask(taskId: string, opts?: { requesterProfileId?: string }): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (opts?.requesterProfileId) {
-      headers['X-Profile-Id'] = opts.requesterProfileId;
-    }
-    const response = await this.client.post(`/api/v1/tasks/${taskId}/restore`, {}, { headers });
+  async restoreTask(taskId: string): Promise<any> {
+    const response = await this.client.post(`/api/v1/tasks/${taskId}/restore`, {});
     return response.data;
   }
 
-  async permanentlyDeleteTask(
-    taskId: string,
-    opts?: { requesterProfileId?: string }
-  ): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (opts?.requesterProfileId) {
-      headers['X-Profile-Id'] = opts.requesterProfileId;
-    }
+  async permanentlyDeleteTask(taskId: string, opts?: { reason?: string }): Promise<any> {
     const response = await this.client.delete(`/api/v1/tasks/${taskId}/permanent`, {
-      headers,
+      data: opts?.reason ? { reason: opts.reason } : {},
     });
     return response.data;
   }
