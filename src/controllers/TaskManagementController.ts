@@ -502,6 +502,21 @@ export class TaskManagementController {
           });
         }
 
+        // Filter by scheduledDate if date range is specified
+        if (params.scheduledDateFrom || params.scheduledDateTo) {
+          const fromDate = params.scheduledDateFrom ? new Date(`${params.scheduledDateFrom}T00:00:00.000+05:30`) : null;
+          const toDate = params.scheduledDateTo ? new Date(`${params.scheduledDateTo}T00:00:00.000+05:30`) : null;
+          if (toDate) toDate.setDate(toDate.getDate() + 1);
+          enrichedTasks = enrichedTasks.filter((task) => {
+            if (!task.scheduledDate) return false;
+            const taskDate = new Date(task.scheduledDate);
+            if (isNaN(taskDate.getTime())) return false;
+            if (fromDate && taskDate < fromDate) return false;
+            if (toDate && taskDate >= toDate) return false;
+            return true;
+          });
+        }
+
         const start = (requestedPage - 1) * requestedLimit;
         res.json({
           success: true,
@@ -535,6 +550,21 @@ export class TaskManagementController {
           if (!task.scheduledDate) return true; // no deadline = not overdue
           if (task.dateOption === 'flexible') return true; // flexible = not overdue
           return new Date(task.scheduledDate) >= now; // keep only future deadlines
+        });
+      }
+
+      // Filter by scheduledDate if date range is specified
+      if (params.scheduledDateFrom || params.scheduledDateTo) {
+        const fromDate = params.scheduledDateFrom ? new Date(`${params.scheduledDateFrom}T00:00:00.000+05:30`) : null;
+        const toDate = params.scheduledDateTo ? new Date(`${params.scheduledDateTo}T00:00:00.000+05:30`) : null;
+        if (toDate) toDate.setDate(toDate.getDate() + 1);
+        enrichedTasks = enrichedTasks.filter((task) => {
+          if (!task.scheduledDate) return false;
+          const taskDate = new Date(task.scheduledDate);
+          if (isNaN(taskDate.getTime())) return false;
+          if (fromDate && taskDate < fromDate) return false;
+          if (toDate && taskDate >= toDate) return false;
+          return true;
         });
       }
 

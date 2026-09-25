@@ -339,10 +339,17 @@ export class PaymentController {
       const uniqueTaskIds = new Set<string>();
 
       rawRefunds.forEach((row: any) => {
-        const posterUid = row.posterUid || row.CustomerUid;
+        const posterUid =
+          row.posterUid ||
+          row.CustomerUid ||
+          row.customerUid ||
+          row.customerId ||
+          row.escrow?.posterUid ||
+          row.escrow?.customerUid;
         if (posterUid) uniqueUids.add(posterUid);
         if (row.performerUid) uniqueUids.add(row.performerUid);
-        if (row.taskId) uniqueTaskIds.add(row.taskId);
+        const taskId = row.taskId || row.escrow?.taskId;
+        if (taskId) uniqueTaskIds.add(taskId);
       });
 
       // If CustomerUid was missing on some rows, look up the task to get customerId / posterUid
@@ -413,15 +420,22 @@ export class PaymentController {
 
       const refunds = await Promise.all(
         rawRefunds.map(async (row: any) => {
-          let posterUid = row.CustomerUid || row.posterUid;
-          if (!posterUid && row.taskId && taskCustomerMap.has(row.taskId)) {
-            posterUid = taskCustomerMap.get(row.taskId);
+          const taskId = row.taskId || row.escrow?.taskId;
+          let posterUid =
+            row.CustomerUid ||
+            row.posterUid ||
+            row.customerUid ||
+            row.customerId ||
+            row.escrow?.posterUid ||
+            row.escrow?.customerUid;
+          if (!posterUid && taskId && taskCustomerMap.has(taskId)) {
+            posterUid = taskCustomerMap.get(taskId);
           }
 
           const [customer, helper, taskTitle] = await Promise.all([
             resolveUser(posterUid),
             resolveUser(row.performerUid),
-            resolveTaskTitle(row.taskId),
+            resolveTaskTitle(taskId),
           ]);
 
           return {
@@ -430,9 +444,9 @@ export class PaymentController {
             links: {
               customerUserId: customer.userId || posterUid,
               helperUserId: helper.userId || row.performerUid,
-              taskId: row.taskId,
+              taskId,
               customerName: customer.name || posterUid,
-              taskTitle: taskTitle || row.taskId,
+              taskTitle: taskTitle || taskId,
               helperName: helper.name || row.performerUid,
             },
           };
