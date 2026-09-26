@@ -373,6 +373,7 @@ export class TaskManagementController {
         (req.query.customerId as string) || (req.query.CustomerId as string);
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
+      const postedByParam = String(req.query.postedBy || '').trim().toLowerCase();
       const requestedStatus = String(req.query.status || '').trim();
       const bookingSource = String(req.query.bookingSource || '').trim();
       const paymentType = String(req.query.paymentType || '').trim(); // 'paid' | 'free_coupon' | ''
@@ -416,6 +417,8 @@ export class TaskManagementController {
         isOverdueFilter ||
         (followUpStatus && followUpStatus !== 'all') ||
         Boolean(assigneeFilter) ||
+        postedByParam === 'customer' ||
+        postedByParam === 'team' ||
         (paymentType && paymentType !== 'all');
 
       if (needsLocalFilter) {
@@ -485,6 +488,41 @@ export class TaskManagementController {
               assigneeFilterUserId,
             ),
           );
+        }
+
+        if (postedByParam === 'customer' || postedByParam === 'team') {
+          const requesterIds = Array.from(new Set(
+            enrichedTasks
+              .map((task) => normalizeTaskIdForAssignment(
+                task.CustomerId || task.customerId || task.requesterId,
+              ))
+              .filter(Boolean),
+          ));
+          const [settings, profileBatch] = await Promise.all([
+            getTaskPostedEmailSettings(),
+            requesterIds.length > 0
+              ? userServiceClient.getProfilesBatch(requesterIds)
+              : Promise.resolve({ profiles: [] }),
+          ]);
+          const profiles = Array.isArray(profileBatch?.profiles)
+            ? profileBatch.profiles
+            : [];
+          const profileByRequesterId = new Map<string, any>();
+          for (const profile of profiles) {
+            for (const id of [profile?._id, profile?.id, profile?.profileId, profile?.userId, profile?.uid]) {
+              if (id) profileByRequesterId.set(String(id), profile);
+            }
+          }
+
+          enrichedTasks = enrichedTasks.filter((task) => {
+            const requesterId = normalizeTaskIdForAssignment(
+              task.CustomerId || task.customerId || task.requesterId,
+            );
+            const phone = String(profileByRequesterId.get(requesterId)?.phone || '').trim();
+            if (!phone) return false;
+            const isTeamPosted = isPhoneExcluded(phone, settings.excludedPhones);
+            return postedByParam === 'team' ? isTeamPosted : !isTeamPosted;
+          });
         }
 
         // Apply paymentType filter:
