@@ -1,0 +1,941 @@
+{
+  "version": 1,
+  "cities": [
+    {
+      "id": "hyderabad",
+      "name": "Hyderabad",
+      "zones": [
+        {
+          "id": "lb-nagar-zone",
+          "name": "LB Nagar Zone",
+          "areas": [
+            {
+              "id": "nagole",
+              "name": "Nagole",
+              "latitude": 17.3661,
+              "longitude": 78.576,
+              "enabled": true
+            },
+            {
+              "id": "uppal",
+              "name": "Uppal",
+              "latitude": 17.4,
+              "longitude": 78.559,
+              "enabled": true
+            },
+            {
+              "id": "habsiguda",
+              "name": "Habsiguda",
+              "latitude": 17.4056,
+              "longitude": 78.553,
+              "enabled": true
+            },
+            {
+              "id": "mallapur",
+              "name": "Mallapur",
+              "enabled": true
+            },
+            {
+              "id": "nacharam",
+              "name": "Nacharam",
+              "enabled": true
+            },
+            {
+              "id": "chilkanagar",
+              "name": "Chilkanagar",
+              "enabled": true
+            },
+            {
+              "id": "ramanthapur",
+              "name": "Ramanthapur",
+              "enabled": true
+            },
+            {
+              "id": "kapra",
+              "name": "Kapra",
+              "enabled": true
+            },
+            {
+              "id": "dr-a-s-rao-nagar",
+              "name": "Dr. A.S. Rao Nagar",
+              "enabled": true
+            },
+            {
+              "id": "cherlapally",
+              "name": "Cherlapally",
+              "enabled": true
+            },
+            {
+              "id": "meerpet-hb-colony",
+              "name": "Meerpet H.B. Colony",
+              "enabled": true
+            },
+            {
+              "id": "mansoorabad",
+              "name": "Mansoorabad",
+              "enabled": true
+            },
+            {
+              "id": "hayathnagar",
+              "name": "Hayathnagar",
+              "enabled": true
+            },
+            {
+              "id": "bn-reddy-nagar",
+              "name": "B.N. Reddy Nagar",
+              "enabled": true
+            },
+            {
+              "id": "vanasthalipuram",
+              "name": "Vanasthalipuram",
+              "enabled": true
+            },
+            {
+              "id": "hastinapuram",
+              "name": "Hastinapuram",
+              "enabled": true
+            },
+            {
+              "id": "champapet",
+              "name": "Champapet",
+              "enabled": true
+            },
+            {
+              "id": "lingojiguda",
+              "name": "Lingojiguda",
+              "enabled": true
+            },
+            {
+              "id": "saroornagar",
+              "name": "Saroornagar",
+              "enabled": true
+            },
+            {
+              "id": "rk-puram",
+              "name": "R.K. Puram",
+              "enabled": true
+            },
+            {
+              "id": "kothapet",
+              "name": "Kothapet",
+              "enabled": true
+            },
+            {
+              "id": "gaddiannaram",
+              "name": "Gaddiannaram",
+              "enabled": true
+            },
+            {
+              "id": "chaitanyapuri",
+              "name": "Chaitanyapuri",
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "charminar-zone",
+          "name": "Charminar Zone",
+          "areas": [
+            {
+              "id": "saidabad",
+              "name": "Saidabad",
+              "enabled": true
+            },
+            {
+              "id": "moosrambagh",
+              "name": "Moosrambagh",
+              "enabled": true
+            },
+            {
+              "id": "old-malakpet",
+              "name": "Old Malakpet",
+              "enabled": true
+            },
+            {
+              "id": "akberbagh",
+              "name": "Akberbagh",
+              "enabled": true
+            },
+            {
+              "id": "azampura",
+              "name": "Azampura",
+              "enabled": true
+            },
+            {
+              "id": "chawani",
+              "name": "Chawani",
+              "enabled": true
+            },
+            {
+              "id": "dabeerpura",
+              "name": "Dabeerpura",
+              "enabled": true
+            },
+            {
+              "id": "rein-bazar",
+              "name": "Rein Bazar",
+              "enabled": true
+            },
+            {
+              "id": "talabchanchalam",
+              "name": "Talabchanchalam",
+              "enabled": true
+            },
+            {
+              "id": "gowlipura",
+              "name": "Gowlipura",
+              "enabled": true
+            },
+            {
+              "id": "kurmaguda",
+              "name": "Kurmaguda",
+              "enabled": true
+            },
+            {
+              "id": "is-sadan",
+              "name": "IS Sadan",
+              "enabled": true
+            },
+            {
+              "id": "santosh-nagar",
+              "name": "Santosh Nagar",
+              "enabled": true
+            },
+            {
+              "id": "lalithbagh",
+              "name": "Lalithbagh",
+              "enabled": true
+            },
+            {
+              "id": "riyasath-nagar",
+              "name": "Riyasath Nagar",
+              "enabled": true
+            },
+            {
+              "id": "kanchanbagh",
+              "name": "Kanchanbagh",
+              "enabled": true
+            },
+            {
+              "id": "barkas",
+              "name": "Barkas",
+              "enabled": true
+            },
+            {
+              "id": "chandrayangutta",
+              "name": "Chandrayangutta",
+              "enabled": true
+            },
+            {
+              "id": "uppuguda",
+              "name": "Uppuguda",
+              "enabled": true
+            },
+            {
+              "id": "jangammet",
+              "name": "Jangammet",
+              "enabled": true
+            },
+            {
+              "id": "pathergatti",
+              "name": "Pathergatti",
+              "enabled": true
+            },
+            {
+              "id": "moghalpura",
+              "name": "Moghalpura",
+              "enabled": true
+            },
+            {
+              "id": "shalibanda",
+              "name": "Shalibanda",
+              "enabled": true
+            },
+            {
+              "id": "ghansi-bazar",
+              "name": "Ghansi Bazar",
+              "enabled": true
+            },
+            {
+              "id": "puranapul",
+              "name": "Puranapul",
+              "enabled": true
+            },
+            {
+              "id": "falaknuma",
+              "name": "Falaknuma",
+              "latitude": 17.33,
+              "longitude": 78.468,
+              "enabled": true
+            },
+            {
+              "id": "nawab-saheb-kunta",
+              "name": "Nawab Saheb Kunta",
+              "enabled": true
+            },
+            {
+              "id": "doodbowli",
+              "name": "Doodbowli",
+              "enabled": true
+            },
+            {
+              "id": "jahanuma",
+              "name": "Jahanuma",
+              "enabled": true
+            },
+            {
+              "id": "ramnaspura",
+              "name": "Ramnaspura",
+              "enabled": true
+            },
+            {
+              "id": "kishanbagh",
+              "name": "Kishanbagh",
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "khairatabad-zone",
+          "name": "Khairatabad Zone",
+          "areas": [
+            {
+              "id": "mehdipatnam",
+              "name": "Mehdipatnam",
+              "latitude": 17.3978,
+              "longitude": 78.4376,
+              "enabled": true
+            },
+            {
+              "id": "karwan",
+              "name": "Karwan",
+              "enabled": true
+            },
+            {
+              "id": "goshamahal",
+              "name": "Goshamahal",
+              "enabled": true
+            },
+            {
+              "id": "musheerabad",
+              "name": "Musheerabad",
+              "enabled": true
+            },
+            {
+              "id": "amberpet",
+              "name": "Amberpet",
+              "latitude": 17.3966,
+              "longitude": 78.512,
+              "enabled": true
+            },
+            {
+              "id": "khairatabad",
+              "name": "Khairatabad",
+              "latitude": 17.411,
+              "longitude": 78.427,
+              "enabled": true
+            },
+            {
+              "id": "jubilee-hills",
+              "name": "Jubilee Hills",
+              "latitude": 17.4318,
+              "longitude": 78.4028,
+              "enabled": true
+            },
+            {
+              "id": "yousufguda",
+              "name": "Yousufguda",
+              "latitude": 17.438,
+              "longitude": 78.425,
+              "enabled": true
+            },
+            {
+              "id": "banjara-hills",
+              "name": "Banjara Hills",
+              "latitude": 17.4196,
+              "longitude": 78.432,
+              "enabled": true
+            },
+            {
+              "id": "shaikpet",
+              "name": "Shaikpet",
+              "latitude": 17.4083,
+              "longitude": 78.426,
+              "enabled": true
+            },
+            {
+              "id": "tolichowki",
+              "name": "Tolichowki",
+              "enabled": true
+            },
+            {
+              "id": "nanal-nagar",
+              "name": "Nanal Nagar",
+              "enabled": true
+            },
+            {
+              "id": "asif-nagar",
+              "name": "Asif Nagar",
+              "enabled": true
+            },
+            {
+              "id": "mallepally",
+              "name": "Mallepally",
+              "enabled": true
+            },
+            {
+              "id": "nampally",
+              "name": "Nampally",
+              "enabled": true
+            },
+            {
+              "id": "lakdikapul",
+              "name": "Lakdikapul",
+              "enabled": true
+            },
+            {
+              "id": "somajiguda",
+              "name": "Somajiguda",
+              "latitude": 17.418,
+              "longitude": 78.438,
+              "enabled": true
+            },
+            {
+              "id": "ameerpet",
+              "name": "Ameerpet",
+              "latitude": 17.437,
+              "longitude": 78.448,
+              "enabled": true
+            },
+            {
+              "id": "punjagutta",
+              "name": "Punjagutta",
+              "enabled": true
+            },
+            {
+              "id": "sanathnagar",
+              "name": "Sanathnagar",
+              "enabled": true
+            },
+            {
+              "id": "erragadda",
+              "name": "Erragadda",
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "secunderabad-zone",
+          "name": "Secunderabad Zone",
+          "areas": [
+            {
+              "id": "kavadiguda",
+              "name": "Kavadiguda",
+              "enabled": true
+            },
+            {
+              "id": "ramnagar",
+              "name": "Ramnagar",
+              "enabled": true
+            },
+            {
+              "id": "bholakpur",
+              "name": "Bholakpur",
+              "enabled": true
+            },
+            {
+              "id": "bakaram",
+              "name": "Bakaram",
+              "enabled": true
+            },
+            {
+              "id": "gandhi-nagar",
+              "name": "Gandhi Nagar",
+              "enabled": true
+            },
+            {
+              "id": "kachiguda",
+              "name": "Kachiguda",
+              "enabled": true
+            },
+            {
+              "id": "vidyanagar",
+              "name": "Vidyanagar",
+              "enabled": true
+            },
+            {
+              "id": "adikmet",
+              "name": "Adikmet",
+              "enabled": true
+            },
+            {
+              "id": "tarnaka",
+              "name": "Tarnaka",
+              "enabled": true
+            },
+            {
+              "id": "mettuguda",
+              "name": "Mettuguda",
+              "enabled": true
+            },
+            {
+              "id": "sitaphalmandi",
+              "name": "Sitaphalmandi",
+              "enabled": true
+            },
+            {
+              "id": "chilkalguda",
+              "name": "Chilkalguda",
+              "enabled": true
+            },
+            {
+              "id": "secunderabad",
+              "name": "Secunderabad",
+              "latitude": 17.439,
+              "longitude": 78.498,
+              "enabled": true
+            },
+            {
+              "id": "monda-market",
+              "name": "Monda Market",
+              "enabled": true
+            },
+            {
+              "id": "bhoiguda",
+              "name": "Bhoiguda",
+              "enabled": true
+            },
+            {
+              "id": "padmarao-nagar",
+              "name": "Padmarao Nagar",
+              "enabled": true
+            },
+            {
+              "id": "marredpally",
+              "name": "Marredpally",
+              "enabled": true
+            },
+            {
+              "id": "begumpet",
+              "name": "Begumpet",
+              "latitude": 17.443,
+              "longitude": 78.47,
+              "enabled": true
+            },
+            {
+              "id": "musheerabad",
+              "name": "Musheerabad",
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "serilingampally-zone",
+          "name": "Serilingampally Zone",
+          "areas": [
+            {
+              "id": "yousufguda",
+              "name": "Yousufguda",
+              "latitude": 17.438,
+              "longitude": 78.425,
+              "enabled": true
+            },
+            {
+              "id": "serilingampally",
+              "name": "Serilingampally",
+              "latitude": 17.4858,
+              "longitude": 78.305,
+              "enabled": true
+            },
+            {
+              "id": "hafeezpet",
+              "name": "Hafeezpet",
+              "enabled": true
+            },
+            {
+              "id": "chandanagar",
+              "name": "Chandanagar",
+              "enabled": true
+            },
+            {
+              "id": "lingampally",
+              "name": "Lingampally",
+              "enabled": true
+            },
+            {
+              "id": "miyapur",
+              "name": "Miyapur",
+              "latitude": 17.497,
+              "longitude": 78.354,
+              "enabled": true
+            },
+            {
+              "id": "madinaguda",
+              "name": "Madinaguda",
+              "enabled": true
+            },
+            {
+              "id": "kondapur",
+              "name": "Kondapur",
+              "latitude": 17.4555,
+              "longitude": 78.349,
+              "enabled": true
+            },
+            {
+              "id": "gachibowli",
+              "name": "Gachibowli",
+              "latitude": 17.4409,
+              "longitude": 78.342,
+              "enabled": true
+            },
+            {
+              "id": "nanakramguda",
+              "name": "Nanakramguda",
+              "enabled": true
+            },
+            {
+              "id": "financial-district",
+              "name": "Financial District",
+              "enabled": true
+            },
+            {
+              "id": "nallagandla",
+              "name": "Nallagandla",
+              "enabled": true
+            },
+            {
+              "id": "tellapur",
+              "name": "Tellapur",
+              "latitude": 17.51,
+              "longitude": 78.3,
+              "enabled": true
+            },
+            {
+              "id": "patancheru",
+              "name": "Patancheru",
+              "latitude": 17.5316,
+              "longitude": 78.264,
+              "enabled": true
+            },
+            {
+              "id": "ramachandrapuram",
+              "name": "Ramachandrapuram",
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "kukatpally-zone",
+          "name": "Kukatpally Zone",
+          "areas": [
+            {
+              "id": "moosapet",
+              "name": "Moosapet",
+              "enabled": true
+            },
+            {
+              "id": "balanagar",
+              "name": "Balanagar",
+              "latitude": 17.477,
+              "longitude": 78.417,
+              "enabled": true
+            },
+            {
+              "id": "kukatpally",
+              "name": "Kukatpally",
+              "latitude": 17.484,
+              "longitude": 78.4,
+              "enabled": true
+            },
+            {
+              "id": "kphb-colony",
+              "name": "KPHB Colony",
+              "enabled": true
+            },
+            {
+              "id": "vivekananda-nagar",
+              "name": "Vivekananda Nagar",
+              "enabled": true
+            },
+            {
+              "id": "hydernagar",
+              "name": "Hydernagar",
+              "enabled": true
+            },
+            {
+              "id": "nizampet",
+              "name": "Nizampet",
+              "latitude": 17.5297,
+              "longitude": 78.369,
+              "enabled": true
+            },
+            {
+              "id": "pragathi-nagar",
+              "name": "Pragathi Nagar",
+              "enabled": true
+            },
+            {
+              "id": "quthbullapur",
+              "name": "Quthbullapur",
+              "latitude": 17.522,
+              "longitude": 78.418,
+              "enabled": true
+            },
+            {
+              "id": "chintal",
+              "name": "Chintal",
+              "enabled": true
+            },
+            {
+              "id": "jeedimetla",
+              "name": "Jeedimetla",
+              "enabled": true
+            },
+            {
+              "id": "gajularamaram",
+              "name": "Gajularamaram",
+              "enabled": true
+            },
+            {
+              "id": "suraram",
+              "name": "Suraram",
+              "enabled": true
+            },
+            {
+              "id": "jagadgirigutta",
+              "name": "Jagadgirigutta",
+              "enabled": true
+            },
+            {
+              "id": "alwal",
+              "name": "Alwal",
+              "enabled": true
+            },
+            {
+              "id": "old-bowenpally",
+              "name": "Old Bowenpally",
+              "enabled": true
+            },
+            {
+              "id": "new-bowenpally",
+              "name": "New Bowenpally",
+              "enabled": true
+            },
+            {
+              "id": "fateh-nagar",
+              "name": "Fateh Nagar",
+              "enabled": true
+            },
+            {
+              "id": "kompally",
+              "name": "Kompally",
+              "latitude": 17.546,
+              "longitude": 78.423,
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "badangpet-zone",
+          "name": "Badangpet Zone",
+          "areas": [
+            {
+              "id": "almasguda",
+              "name": "Almasguda",
+              "enabled": true
+            }
+          ],
+          "enabled": true
+        },
+        {
+          "id": "additional-service-areas",
+          "name": "Additional Service Areas",
+          "enabled": true,
+          "areas": [
+            {
+              "id": "madhapur",
+              "name": "Madhapur",
+              "latitude": 17.448,
+              "longitude": 78.391,
+              "enabled": true
+            },
+            {
+              "id": "manikonda",
+              "name": "Manikonda",
+              "latitude": 17.3874,
+              "longitude": 78.369,
+              "enabled": true
+            },
+            {
+              "id": "attapur",
+              "name": "Attapur",
+              "latitude": 17.353,
+              "longitude": 78.411,
+              "enabled": true
+            },
+            {
+              "id": "central-hyderabad",
+              "name": "Central Hyderabad",
+              "latitude": 17.385,
+              "longitude": 78.4867,
+              "enabled": true
+            },
+            {
+              "id": "malakpet",
+              "name": "Malakpet",
+              "latitude": 17.3695,
+              "longitude": 78.506,
+              "enabled": true
+            },
+            {
+              "id": "dilsukhnagar",
+              "name": "Dilsukhnagar",
+              "latitude": 17.372,
+              "longitude": 78.525,
+              "enabled": true
+            },
+            {
+              "id": "lb-nagar",
+              "name": "LB Nagar",
+              "latitude": 17.347,
+              "longitude": 78.551,
+              "enabled": true
+            },
+            {
+              "id": "malkajgiri",
+              "name": "Malkajgiri",
+              "latitude": 17.4473,
+              "longitude": 78.53,
+              "enabled": true
+            },
+            {
+              "id": "sainikpuri",
+              "name": "Sainikpuri",
+              "latitude": 17.4661,
+              "longitude": 78.548,
+              "enabled": true
+            },
+            {
+              "id": "bowenpally",
+              "name": "Bowenpally",
+              "latitude": 17.478,
+              "longitude": 78.457,
+              "enabled": true
+            },
+            {
+              "id": "bandlaguda",
+              "name": "Bandlaguda",
+              "latitude": 17.267,
+              "longitude": 78.478,
+              "enabled": true
+            },
+            {
+              "id": "shamshabad",
+              "name": "Shamshabad",
+              "latitude": 17.2514,
+              "longitude": 78.399,
+              "enabled": true
+            },
+            {
+              "id": "old-city",
+              "name": "Old City",
+              "latitude": 17.363,
+              "longitude": 78.474,
+              "enabled": true
+            },
+            {
+              "id": "bahadurpura",
+              "name": "Bahadurpura",
+              "latitude": 17.35,
+              "longitude": 78.477,
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "siddipet",
+      "name": "Siddipet",
+      "zones": [
+        {
+          "id": "central-zone",
+          "name": "Central Zone",
+          "enabled": true,
+          "areas": [
+            {
+              "id": "siddipet",
+              "name": "Siddipet",
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "mahabubnagar",
+      "name": "Mahabubnagar",
+      "zones": [
+        {
+          "id": "central-zone",
+          "name": "Central Zone",
+          "enabled": true,
+          "areas": [
+            {
+              "id": "mahabubnagar",
+              "name": "Mahabubnagar",
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "karimnagar",
+      "name": "Karimnagar",
+      "zones": [
+        {
+          "id": "central-zone",
+          "name": "Central Zone",
+          "enabled": true,
+          "areas": [
+            {
+              "id": "karimnagar",
+              "name": "Karimnagar",
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "id": "warangal",
+      "name": "Warangal",
+      "zones": [
+        {
+          "id": "central-zone",
+          "name": "Central Zone",
+          "enabled": true,
+          "areas": [
+            {
+              "id": "warangal",
+              "name": "Warangal",
+              "enabled": true
+            }
+          ]
+        }
+      ],
+      "enabled": true
+    }
+  ]
+}
