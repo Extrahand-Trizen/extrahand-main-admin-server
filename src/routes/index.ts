@@ -16,6 +16,7 @@ import aadhaarFollowUpRoutes from './aadhaarFollowUps';
 import bookNowRoutes from './bookNow';
 import qcommerceRoutes from './qcommerce';
 import assignmentManagementRoutes from './assignmentManagement';
+import locationPricingRoutes from './locationPricing';
 
 const router = Router();
 
@@ -40,6 +41,7 @@ router.use(`${API_PREFIX}/aadhaar-followups`, aadhaarFollowUpRoutes);
 router.use(`${API_PREFIX}/book-now`, bookNowRoutes);
 router.use(`${API_PREFIX}/qcommerce`, qcommerceRoutes);
 router.use(`${API_PREFIX}/assignment-management`, assignmentManagementRoutes);
+router.use(`${API_PREFIX}/location-pricing`, locationPricingRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

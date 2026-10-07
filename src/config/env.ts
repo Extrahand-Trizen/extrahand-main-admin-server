@@ -44,6 +44,7 @@ const envSchema = z.object({
   QCOMMERCE_SERVICE_URL: z.string().url().default('http://localhost:4010'),
   SUPPORT_SERVICE_URL: z.string().url().optional(),
   SERVICE_AUTH_TOKEN: z.string().min(32),
+  GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
   
   // Email Service (for invites)
   EMAIL_SERVICE_URL: z.string().url().optional(),
