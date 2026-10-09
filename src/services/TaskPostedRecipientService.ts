@@ -7,6 +7,7 @@ import {
   normalizeAdminEmail,
   resolveAssignedDisplayName,
 } from '../constants/taskAssignment';
+import { getRoundRobinEmails } from './RoundRobinTeamSettingsService';
 
 export type TaskPostedRecipient = {
   userId: string;
@@ -34,14 +35,15 @@ function hasActiveMainAdminOpsAccess(admin: {
 }
 
 export async function listTaskPostedRecipients(): Promise<TaskPostedRecipient[]> {
+  const roundRobinEmails = await getRoundRobinEmails();
   const admins = await AdminUser.find({
     status: 'active',
-    email: { $in: [...TASK_POSTED_ROUND_ROBIN_EMAILS] },
+    email: { $in: [...roundRobinEmails] },
   })
     .select('userId email name dashboardAccess')
     .lean();
 
-  return TASK_POSTED_ROUND_ROBIN_EMAILS.map((email) => {
+  return roundRobinEmails.map((email) => {
     const admin = admins.find(
       (row) => normalizeAdminEmail(row.email) === normalizeAdminEmail(email),
     );
@@ -59,13 +61,14 @@ export async function getNextTaskPostedRecipient(): Promise<TaskPostedRecipient 
   const activeRecipients = await listTaskPostedRecipients();
 
   if (activeRecipients.length === 0) {
+    const roundRobinEmails = await getRoundRobinEmails();
     const admins = await AdminUser.find({
-      email: { $in: [...TASK_POSTED_ROUND_ROBIN_EMAILS] },
+      email: { $in: [...roundRobinEmails] },
     })
       .select('userId email status dashboardAccess')
       .lean();
     logger.error('No active operations admins found for task_posted round-robin', {
-      expectedEmails: TASK_POSTED_ROUND_ROBIN_EMAILS,
+      expectedEmails: roundRobinEmails,
       foundAdminEmails: admins.map((admin) => admin.email),
       foundAccess: admins.map((admin) => ({
         email: admin.email,

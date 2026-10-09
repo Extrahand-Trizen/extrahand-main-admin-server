@@ -2,11 +2,23 @@ import { Router } from 'express';
 import { UserManagementController } from '../controllers/UserManagementController';
 import { verifyAuth, requirePermission } from '../middleware/auth';
 import { Resource, Action } from '../types/permissions';
+import { PartnerCategoryRequestController } from '../controllers/PartnerCategoryRequestController';
 
 const router = Router();
 
 // All routes require authentication
 router.use(verifyAuth);
+
+router.get(
+  '/partner-category-requests',
+  requirePermission(`${Resource.USER}.${Action.LIST}`),
+  PartnerCategoryRequestController.list
+);
+router.patch(
+  '/partner-category-requests/:requestId',
+  requirePermission(`${Resource.USER}.${Action.UPDATE}`),
+  PartnerCategoryRequestController.review
+);
 
 // User management routes
 router.get(

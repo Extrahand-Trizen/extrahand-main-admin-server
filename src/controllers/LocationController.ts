@@ -69,7 +69,8 @@ function activeCatalog(cities: LocationNode[]): LocationNode[] {
     .filter((city) => city.enabled !== false)
     .map((city) => ({
       ...city,
-      zones: (city.zones || [])
+      areas: (city.areas || []).filter((area) => area.enabled !== false),
+      zones: city.areas?.length ? [] : (city.zones || [])
         .filter((zone) => zone.enabled !== false)
         .map((zone) => ({
           ...zone,
@@ -177,6 +178,56 @@ export class LocationController {
       const city = ensureNode(cities, req.params.cityId, 'City');
       ensureNode(city.zones, req.params.zoneId, 'Zone');
       city.zones = (city.zones || []).filter((zone) => zone.id !== req.params.zoneId);
+    });
+  }
+
+  static createCityArea(req: Request, res: Response): Promise<void> {
+    return saveMutation(req, res, (cities) => {
+      const city = ensureNode(cities, req.params.cityId, 'City');
+      const areas = city.areas || (city.areas = []);
+      const name = requireName(req.body.name);
+      ensureUniqueName(areas, name);
+      const latitude = req.body.latitude === undefined ? undefined : Number(req.body.latitude);
+      const longitude = req.body.longitude === undefined ? undefined : Number(req.body.longitude);
+      if ((latitude !== undefined && !Number.isFinite(latitude)) || (longitude !== undefined && !Number.isFinite(longitude))) {
+        const error = new Error('Coordinates must be valid numbers') as Error & { status?: number };
+        error.status = 400;
+        throw error;
+      }
+      areas.push({ id: locationId(areas, name), name, enabled: true, latitude, longitude });
+    });
+  }
+
+  static updateCityArea(req: Request, res: Response): Promise<void> {
+    return saveMutation(req, res, (cities) => {
+      const city = ensureNode(cities, req.params.cityId, 'City');
+      const areas = city.areas || [];
+      const area = ensureNode(areas, req.params.areaId, 'Area');
+      if (req.body.name !== undefined) {
+        const name = requireName(req.body.name);
+        ensureUniqueName(areas, name, area.id);
+        area.name = name;
+      }
+      if (req.body.enabled !== undefined) area.enabled = Boolean(req.body.enabled);
+      for (const key of ['latitude', 'longitude'] as const) {
+        if (req.body[key] !== undefined) {
+          const value = Number(req.body[key]);
+          if (!Number.isFinite(value)) {
+            const error = new Error('Coordinates must be valid numbers') as Error & { status?: number };
+            error.status = 400;
+            throw error;
+          }
+          area[key] = value;
+        }
+      }
+    });
+  }
+
+  static deleteCityArea(req: Request, res: Response): Promise<void> {
+    return saveMutation(req, res, (cities) => {
+      const city = ensureNode(cities, req.params.cityId, 'City');
+      ensureNode(city.areas, req.params.areaId, 'Area');
+      city.areas = (city.areas || []).filter((area) => area.id !== req.params.areaId);
     });
   }
 
