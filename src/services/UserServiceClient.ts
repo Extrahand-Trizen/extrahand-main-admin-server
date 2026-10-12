@@ -86,6 +86,35 @@ export class UserServiceClient {
     return response.data;
   }
 
+  async listPartnerCategoryRequests(params: {
+    status?: string;
+    page?: number;
+    limit?: number;
+    search?: string;
+    requestedCategory?: string;
+    currentCategory?: string;
+    city?: string;
+  }, adminUserId?: string): Promise<any> {
+    const response = await this.client.get('/api/v1/users/partner-category-requests', {
+      params,
+      headers: adminUserId ? { 'X-User-Id': adminUserId } : {},
+    });
+    return response.data;
+  }
+
+  async reviewPartnerCategoryRequest(
+    requestId: string,
+    body: { status: 'approved' | 'rejected'; reviewNotes?: string },
+    adminUserId: string,
+  ): Promise<any> {
+    const response = await this.client.patch(
+      `/api/v1/users/partner-category-requests/${encodeURIComponent(requestId)}`,
+      body,
+      { headers: { 'X-User-Id': adminUserId } },
+    );
+    return response.data;
+  }
+
   async getHyderabadSubAreas(): Promise<any> {
     const response = await this.client.get('/api/v1/users/areas/hyderabad');
     return response.data;

@@ -9,6 +9,7 @@ import {
   normalizeAdminEmail,
   resolveAssignedDisplayName,
 } from '../constants/taskAssignment';
+import { getRoundRobinEmails } from './RoundRobinTeamSettingsService';
 
 export type AadhaarKycRecipient = {
   userId: string;
@@ -37,14 +38,15 @@ function hasActiveMainAdminOpsAccess(admin: {
 }
 
 export async function listAadhaarKycRecipients(): Promise<AadhaarKycRecipient[]> {
+  const roundRobinEmails = await getRoundRobinEmails();
   const admins = await AdminUser.find({
     status: 'active',
-    email: { $in: [...TASK_POSTED_ROUND_ROBIN_EMAILS] },
+    email: { $in: [...roundRobinEmails] },
   })
     .select('userId email name dashboardAccess')
     .lean();
 
-  return TASK_POSTED_ROUND_ROBIN_EMAILS.map((email) => {
+  return roundRobinEmails.map((email) => {
     const admin = admins.find(
       (row) => normalizeAdminEmail(row.email) === normalizeAdminEmail(email),
     );
@@ -61,8 +63,9 @@ export async function listAadhaarKycRecipients(): Promise<AadhaarKycRecipient[]>
 export async function getNextAadhaarKycRecipient(): Promise<AadhaarKycRecipient | null> {
   const activeRecipients = await listAadhaarKycRecipients();
   if (activeRecipients.length === 0) {
+    const roundRobinEmails = await getRoundRobinEmails();
     logger.error('No active operations admins found for Aadhaar KYC round-robin', {
-      expectedEmails: TASK_POSTED_ROUND_ROBIN_EMAILS,
+      expectedEmails: roundRobinEmails,
     });
     return null;
   }

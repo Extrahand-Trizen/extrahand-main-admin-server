@@ -1,24 +1,31 @@
 /**
- * Only these 2 operations admins receive task_posted in-app notifications (round-robin).
+ * These 4 operations admins receive task_posted in-app notifications (round-robin).
  * No email is sent for task assignment — dashboard bell only.
+ * Round-robin order: durgamshiva → shivakumar → bandelabharathreddy → saikumar
  */
 export const TASK_POSTED_ROUND_ROBIN_EMAILS = [
   'durgamshiva@cognitbotz.com',
-  'tadembharat@cognitbotz.com',
+  'shivakumar@cognitbotz.com',
+  'bharatr@cognitbotz.com',
+  'saikumarn@cognitbotz.com',
 ] as const;
 
 export const TASK_POSTED_EMAIL_RECIPIENTS = [
   'harishv@cognitbotz.com',
   'nukaraju@trizenventures.com',
   'durgamshiva@cognitbotz.com',
-  'tadembharat@cognitbotz.com',
+  'shivakumar@cognitbotz.com',
+  'bharatr@cognitbotz.com',
+  'saikumarn@cognitbotz.com',
   'avvaruasishvenkat.22.cse@anits.edu.in',
   'vinayreddy@cognitbotz.com',
 ] as const;
 
 export const TASK_ASSIGNED_EMAIL_TO_NAME: Record<string, string> = {
   'durgamshiva@cognitbotz.com': 'durgamshiva',
-  'tadembharat@cognitbotz.com': 'tadembharath',
+  'shivakumar@cognitbotz.com': 'shivakumar',
+  'bharatr@cognitbotz.com': 'bandelabharathreddy',
+  'saikumarn@cognitbotz.com': 'saikumar',
 };
 
 export const TASK_ASSIGNED_EMAILS = Object.keys(TASK_ASSIGNED_EMAIL_TO_NAME);

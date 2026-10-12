@@ -8,6 +8,7 @@ import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import bcrypt from 'bcrypt';
 import { TASK_POSTED_ROUND_ROBIN_EMAILS } from '../constants/taskAssignment';
+import { getRoundRobinEmails } from '../services/RoundRobinTeamSettingsService';
 
 export class AdminUserController {
   /**
@@ -428,10 +429,11 @@ export class AdminUserController {
       // Find remaining active operations admins (excluding this user) who can receive work
       // Limited to round-robin email list (durgamshiva and tadembharath)
       const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+      const roundRobinEmails = await getRoundRobinEmails();
       const allActiveOpsAdmins = await AdminUser.find({
         status: 'active',
         userId: { $ne: userId },
-        email: { $in: TASK_POSTED_ROUND_ROBIN_EMAILS as any },
+        email: { $in: roundRobinEmails },
         'dashboardAccess': {
           $elemMatch: {
             dashboardType: DashboardType.MAIN_ADMIN,
@@ -487,12 +489,13 @@ export class AdminUserController {
       }
 
       // Find remaining active operations admins (excluding this user)
-      // Limited to round-robin email list (durgamshiva and tadembharath)
+      // Limited to round-robin email list
       const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+      const roundRobinEmails = await getRoundRobinEmails();
       const remainingAdmins = await AdminUser.find({
         status: 'active',
         userId: { $ne: userId },
-        email: { $in: TASK_POSTED_ROUND_ROBIN_EMAILS as any },
+        email: { $in: roundRobinEmails },
         'dashboardAccess': {
           $elemMatch: {
             dashboardType: DashboardType.MAIN_ADMIN,
