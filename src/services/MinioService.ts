@@ -83,6 +83,30 @@ class MinioService {
   }
 
   /**
+   * Upload to the public images bucket (not the KYC vault) and return its permanent URL.
+   * Used for content that end users must load directly, e.g. push notification images.
+   */
+  async uploadPublicFile(key: string, buffer: Buffer, contentType: string): Promise<string> {
+    if (!this.initialized || !this.s3) {
+      throw new Error('MinioService: storage not configured — cannot upload');
+    }
+
+    const bucket = env.MINIO_BUCKET_NAME || 'extrahand-images';
+    await this.s3
+      .putObject({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+      })
+      .promise();
+
+    const base = buildEndpointString(env.MINIO_SERVER_URL || env.MINIO_ENDPOINT || '');
+    logger.info('MinioService: public file uploaded', { key, bucket, size: buffer.length });
+    return `${base}/${bucket}/${key}`;
+  }
+
+  /**
    * Returns a presigned GET URL for the given object key, or null if MinIO is
    * not configured or an error occurs.  Never throws — callers degrade gracefully.
    */

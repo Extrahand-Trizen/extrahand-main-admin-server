@@ -66,6 +66,29 @@ export class LocationPricingClient {
     return (await this.client.post('/api/v1/catalog/internal/location-pricing/resolve-address', body)).data;
   }
 
+  async listHourlyHelperAvailabilities(params: Record<string, string | undefined>) {
+    return (await this.client.get('/api/v1/catalog/internal/location-pricing/hourly-availability', { params })).data;
+  }
+
+  async toggleHourlyHelperAvailability(type: string, id: string, isEnabled: boolean, updatedBy?: string) {
+    return (await this.client.post(`/api/v1/catalog/internal/location-pricing/hourly-availability/${encodeURIComponent(type)}/${encodeURIComponent(id)}/toggle`, { isEnabled, updatedBy })).data;
+  }
+
+  async removeHourlyHelperAvailability(type: string, id: string, removedBy?: string) {
+    return (await this.client.delete(`/api/v1/catalog/internal/location-pricing/hourly-availability/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { data: { removedBy } })).data;
+  }
+
+  async listPostCompareAreaAvailabilities(params: Record<string, string | undefined>) {
+    return (await this.client.get('/api/v1/catalog/internal/location-pricing/post-compare-availability/areas', { params })).data;
+  }
+
+  async togglePostCompareAreaAvailability(areaId: string, isEnabled: boolean, updatedBy: string) {
+    return (await this.client.post(
+      `/api/v1/catalog/internal/location-pricing/post-compare-availability/areas/${encodeURIComponent(areaId)}/toggle`,
+      { isEnabled, updatedBy },
+    )).data;
+  }
+
   async ensureCanonicalLocation(body: unknown) {
     return (await this.client.post('/api/v1/catalog/internal/location-pricing/ensure-canonical-location', body)).data;
   }

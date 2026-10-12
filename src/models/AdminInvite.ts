@@ -63,7 +63,6 @@ const AdminInviteSchema = new Schema<IAdminInvite>({
 
 // Indexes
 AdminInviteSchema.index({ email: 1 });
-AdminInviteSchema.index({ inviteId: 1 });
 AdminInviteSchema.index({ token: 1 });
 AdminInviteSchema.index({ status: 1 });
 AdminInviteSchema.index({ expiresAt: 1 });

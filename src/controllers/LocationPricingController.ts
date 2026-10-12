@@ -88,6 +88,63 @@ export class LocationPricingController {
     return forward(() => locationPricingClient.resolveAddress(req.body), res, 'Resolve address');
   }
 
+  static listHourlyHelperAvailabilities(req: Request, res: Response) {
+    const params = {
+      search: req.query.search ? String(req.query.search) : undefined,
+      type: req.query.type ? String(req.query.type) : undefined,
+      isEnabled: req.query.isEnabled !== undefined ? String(req.query.isEnabled) : undefined,
+    };
+    return forward(() => locationPricingClient.listHourlyHelperAvailabilities(params), res, 'List hourly helper availabilities');
+  }
+
+  static toggleHourlyHelperAvailability(req: Request, res: Response) {
+    const { type, id } = req.params;
+    const isEnabled = Boolean(req.body.isEnabled);
+    const userEmail = (req as any).user?.email || (req as any).user?.uid || 'admin';
+    return forward(
+      () => locationPricingClient.toggleHourlyHelperAvailability(type, id, isEnabled, userEmail),
+      res,
+      'Toggle hourly helper availability',
+    );
+  }
+
+  static removeHourlyHelperAvailability(req: Request, res: Response) {
+    const { type, id } = req.params;
+    const userEmail = (req as any).user?.email || (req as any).user?.uid || 'admin';
+    return forward(
+      () => locationPricingClient.removeHourlyHelperAvailability(type, id, userEmail),
+      res,
+      'Remove hourly helper availability',
+    );
+  }
+
+  static listPostCompareAreaAvailabilities(req: Request, res: Response) {
+    const params = {
+      search: req.query.search ? String(req.query.search) : undefined,
+    };
+    return forward(
+      () => locationPricingClient.listPostCompareAreaAvailabilities(params),
+      res,
+      'List Post & Compare area availabilities',
+    );
+  }
+
+  static togglePostCompareAreaAvailability(req: Request, res: Response) {
+    if (typeof req.body?.isEnabled !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'isEnabled must be a boolean' });
+    }
+    const updatedBy = req.admin?.email || req.admin?.userId || 'admin';
+    return forward(
+      () => locationPricingClient.togglePostCompareAreaAvailability(
+        String(req.params.areaId),
+        req.body.isEnabled,
+        updatedBy,
+      ),
+      res,
+      'Toggle Post & Compare area availability',
+    );
+  }
+
   static searchLocations(req: Request, res: Response) {
     const query = String(req.query.query || '').trim();
     if (query.length < 2) return res.json({ success: true, data: [] });

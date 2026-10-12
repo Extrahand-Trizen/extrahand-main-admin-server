@@ -373,6 +373,7 @@ export class TaskManagementController {
         (req.query.customerId as string) || (req.query.CustomerId as string);
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
+      const postedByParam = String(req.query.postedBy || '').trim().toLowerCase();
       const requestedStatus = String(req.query.status || '').trim();
       const bookingSource = String(req.query.bookingSource || '').trim();
       const paymentType = String(req.query.paymentType || '').trim(); // 'paid' | 'free_coupon' | ''
@@ -388,7 +389,9 @@ export class TaskManagementController {
 
       // For overdue, we query open tasks from task service and filter by deadline on our side
       // For open, we exclude overdue tasks (those with past scheduledDate and non-flexible dateOption)
-      const upstreamStatus = isOverdueFilter ? 'open' : requestedStatus;
+      const upstreamStatus = isOverdueFilter
+        ? 'open'
+        : (requestedStatus && requestedStatus !== 'all' ? requestedStatus : undefined);
 
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
@@ -396,12 +399,12 @@ export class TaskManagementController {
         search: req.query.search as string,
         status: upstreamStatus,
         excludeOverdue: requestedStatus === 'open' ? 'true' : undefined,
-        category: req.query.category as string,
+        category: req.query.category && req.query.category !== 'all' ? (req.query.category as string) : undefined,
         CustomerId: customerFilter,
         assigneeId: req.query.assigneeId as string,
-        // Pass bookingSource directly to task service so it filters at DB level
-        // (bypasses the marketplace-only clause for book_now / posted_task)
-        bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : undefined,
+        // Pass bookingSource to task service. When 'all' or empty, pass 'all'
+        // so task service returns both book_now and posted_task works.
+        bookingSource: bookingSource && bookingSource !== 'all' ? bookingSource : 'all',
         scheduledDateFrom: req.query.scheduledDateFrom as string,
         scheduledDateTo: req.query.scheduledDateTo as string,
         sortBy: req.query.sortBy as string,
@@ -414,6 +417,8 @@ export class TaskManagementController {
         isOverdueFilter ||
         (followUpStatus && followUpStatus !== 'all') ||
         Boolean(assigneeFilter) ||
+        postedByParam === 'customer' ||
+        postedByParam === 'team' ||
         (paymentType && paymentType !== 'all');
 
       if (needsLocalFilter) {
@@ -444,6 +449,7 @@ export class TaskManagementController {
         enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
         enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
         enrichedTasks = await enrichTasksWithPaymentInfo(enrichedTasks);
+        enrichedTasks = enrichedTasks.filter((t) => !t.isDeletedByCustomer && !t.isDeletedBySupport);
 
         // Apply overdue filter: open tasks whose scheduledDate has passed (and not flexible)
         if (isOverdueFilter) {
@@ -484,6 +490,41 @@ export class TaskManagementController {
           );
         }
 
+        if (postedByParam === 'customer' || postedByParam === 'team') {
+          const requesterIds = Array.from(new Set(
+            enrichedTasks
+              .map((task) => normalizeTaskIdForAssignment(
+                task.CustomerId || task.customerId || task.requesterId,
+              ))
+              .filter(Boolean),
+          ));
+          const [settings, profileBatch] = await Promise.all([
+            getTaskPostedEmailSettings(),
+            requesterIds.length > 0
+              ? userServiceClient.getProfilesBatch(requesterIds)
+              : Promise.resolve({ profiles: [] }),
+          ]);
+          const profiles = Array.isArray(profileBatch?.profiles)
+            ? profileBatch.profiles
+            : [];
+          const profileByRequesterId = new Map<string, any>();
+          for (const profile of profiles) {
+            for (const id of [profile?._id, profile?.id, profile?.profileId, profile?.userId, profile?.uid]) {
+              if (id) profileByRequesterId.set(String(id), profile);
+            }
+          }
+
+          enrichedTasks = enrichedTasks.filter((task) => {
+            const requesterId = normalizeTaskIdForAssignment(
+              task.CustomerId || task.customerId || task.requesterId,
+            );
+            const phone = String(profileByRequesterId.get(requesterId)?.phone || '').trim();
+            if (!phone) return false;
+            const isTeamPosted = isPhoneExcluded(phone, settings.excludedPhones);
+            return postedByParam === 'team' ? isTeamPosted : !isTeamPosted;
+          });
+        }
+
         // Apply paymentType filter:
         // 'free_coupon' = hourly task with payment amount === 0 (fully covered by coupon)
         // 'paid'        = tasks that are paid (not free coupon)
@@ -495,6 +536,21 @@ export class TaskManagementController {
             if (paymentType === 'paid') {
               return task.isFreeCoupon !== true;
             }
+            return true;
+          });
+        }
+
+        // Filter by scheduledDate if date range is specified
+        if (params.scheduledDateFrom || params.scheduledDateTo) {
+          const fromDate = params.scheduledDateFrom ? new Date(`${params.scheduledDateFrom}T00:00:00.000+05:30`) : null;
+          const toDate = params.scheduledDateTo ? new Date(`${params.scheduledDateTo}T00:00:00.000+05:30`) : null;
+          if (toDate) toDate.setDate(toDate.getDate() + 1);
+          enrichedTasks = enrichedTasks.filter((task) => {
+            if (!task.scheduledDate) return false;
+            const taskDate = new Date(task.scheduledDate);
+            if (isNaN(taskDate.getTime())) return false;
+            if (fromDate && taskDate < fromDate) return false;
+            if (toDate && taskDate >= toDate) return false;
             return true;
           });
         }
@@ -521,6 +577,7 @@ export class TaskManagementController {
       enrichedTasks = await enrichTasksWithAssignedTo(enrichedTasks);
       enrichedTasks = await enrichTasksWithAssigneeName(enrichedTasks);
       enrichedTasks = await enrichTasksWithPaymentInfo(enrichedTasks);
+      enrichedTasks = enrichedTasks.filter((t) => !t.isDeletedByCustomer && !t.isDeletedBySupport);
 
       // When filtering by 'open', exclude tasks whose deadline has already passed
       // (overdue tasks should only appear when 'overdue' filter is selected)
@@ -531,6 +588,21 @@ export class TaskManagementController {
           if (!task.scheduledDate) return true; // no deadline = not overdue
           if (task.dateOption === 'flexible') return true; // flexible = not overdue
           return new Date(task.scheduledDate) >= now; // keep only future deadlines
+        });
+      }
+
+      // Filter by scheduledDate if date range is specified
+      if (params.scheduledDateFrom || params.scheduledDateTo) {
+        const fromDate = params.scheduledDateFrom ? new Date(`${params.scheduledDateFrom}T00:00:00.000+05:30`) : null;
+        const toDate = params.scheduledDateTo ? new Date(`${params.scheduledDateTo}T00:00:00.000+05:30`) : null;
+        if (toDate) toDate.setDate(toDate.getDate() + 1);
+        enrichedTasks = enrichedTasks.filter((task) => {
+          if (!task.scheduledDate) return false;
+          const taskDate = new Date(task.scheduledDate);
+          if (isNaN(taskDate.getTime())) return false;
+          if (fromDate && taskDate < fromDate) return false;
+          if (toDate && taskDate >= toDate) return false;
+          return true;
         });
       }
 
@@ -750,22 +822,7 @@ export class TaskManagementController {
         return;
       }
 
-      const taskPayload = await taskServiceClient.getTask(taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(
-        rawTask?.CustomerId || rawTask?.requesterId || '',
-      ).trim();
-      if (!rawTask || !requesterProfileId) {
-        res.status(404).json({
-          success: false,
-          error: 'Task not found or missing requester for delete',
-        });
-        return;
-      }
-
-      const result = await taskServiceClient.deleteTask(taskId, reason.trim(), {
-        requesterProfileId,
-      });
+      const result = await taskServiceClient.deleteTask(taskId, reason.trim());
       
       await createAuditLog(
         req,
@@ -1135,19 +1192,8 @@ export class TaskManagementController {
         return;
       }
 
-      // Perform the delete using the existing deleteTask logic requirements.
-      // We must impersonate requester profile so task-service authZ passes.
-      const taskPayload = await taskServiceClient.getTask(requestDoc.taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
-      if (!requesterProfileId) {
-        res.status(400).json({ success: false, error: 'Task requester profile missing; cannot delete' });
-        return;
-      }
-
-      await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason, {
-        requesterProfileId,
-      });
+      // Perform the delete using admin privileges (task-service bypasses requester check for main-admin-service)
+      await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason);
 
       requestDoc.status = 'approved';
       requestDoc.decidedBy = {
@@ -1426,15 +1472,7 @@ export class TaskManagementController {
     try {
       const { taskId } = req.params;
 
-      const taskPayload = await taskServiceClient.getTask(taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
-      if (!requesterProfileId) {
-        res.status(404).json({ success: false, error: 'Task not found or missing requester for restore' });
-        return;
-      }
-
-      const result = await taskServiceClient.restoreTask(taskId, { requesterProfileId });
+      const result = await taskServiceClient.restoreTask(taskId);
 
       await createAuditLog(
         req,
@@ -1471,20 +1509,7 @@ export class TaskManagementController {
       const { taskId } = req.params;
       const reason = typeof req.body?.reason === 'string' ? String(req.body.reason).trim() : '';
 
-      const taskPayload = await taskServiceClient.getTask(taskId);
-      const rawTask = taskPayload?.data ?? taskPayload;
-      const requesterProfileId = String(rawTask?.CustomerId || rawTask?.requesterId || '').trim();
-      if (!requesterProfileId) {
-        res.status(404).json({
-          success: false,
-          error: 'Task not found or missing requester for permanent delete',
-        });
-        return;
-      }
-
-      const result = await taskServiceClient.permanentlyDeleteTask(taskId, {
-        requesterProfileId,
-      });
+      const result = await taskServiceClient.permanentlyDeleteTask(taskId, reason ? { reason } : undefined);
 
       await createAuditLog(
         req,
