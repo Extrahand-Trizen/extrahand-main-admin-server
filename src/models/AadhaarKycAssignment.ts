@@ -1,3 +1,4 @@
+
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface AadhaarKycAssignmentDocument extends Document {
@@ -12,7 +13,7 @@ export interface AadhaarKycAssignmentDocument extends Document {
 
 const AadhaarKycAssignmentSchema = new Schema<AadhaarKycAssignmentDocument>(
   {
-    userId: { type: String, required: true, unique: true, index: true },
+    userId: { type: String, required: true, unique: true },
     assignedToUserId: { type: String, required: true, index: true },
     assignedToEmail: { type: String, required: true },
     assignedToName: { type: String, required: true },

@@ -43,6 +43,7 @@
     "TASK_SERVICE_URL": "http://srv-captain--extrahand-task-service:4002",
     "SUPPORT_SERVICE_URL": "http://srv-captain--extrahand-platform-support-service:5002",
     "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE",
+    "GOOGLE_MAPS_API_KEY": "AIzaSyBcW2kc0BCki836dicR35SOlzsZvw9sjqI",
     "EMAIL_SERVICE_URL": "https://extrahand-email-service.apps.extrahand.in"
   },
   "volumes": [

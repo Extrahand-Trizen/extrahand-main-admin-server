@@ -104,7 +104,7 @@ const AdminUserSchema = new Schema<IAdminUser>({
 });
 
 // Indexes
-AdminUserSchema.index({ email: 1 });
+// Note: email and userId already have unique:true in the schema so their indexes are auto-created.
 AdminUserSchema.index({ userId: 1 });
 AdminUserSchema.index({ 'dashboardAccess.dashboardType': 1 });
 AdminUserSchema.index({ isSuperAdmin: 1 });
