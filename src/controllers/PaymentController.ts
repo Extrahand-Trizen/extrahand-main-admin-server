@@ -3,6 +3,9 @@ import logger from '../config/logger';
 import { paymentServiceClient } from '../services/PaymentServiceClient';
 import { userServiceClient } from '../services/UserServiceClient';
 import { taskServiceClient } from '../services/TaskServiceClient';
+import { Profile } from '../models/Profile';
+import { Task } from '../models/Task';
+import { enrichEntities } from '../utils/enrichment';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 
 async function safeGet<T>(
@@ -85,129 +88,83 @@ export class PaymentController {
 
   static async listTransactions(req: Request, res: Response): Promise<void> {
     try {
+      const search = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+      const matchingCustomerUids = new Set<string>();
+      const matchingTaskIds = new Set<string>();
+
+      if (search) {
+        const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = new RegExp(escapedSearch, 'i');
+        await Promise.all([
+          (async () => {
+            try {
+              const profiles = await Profile.find({ name: searchRegex })
+                .select('uid')
+                .lean();
+              for (const profile of profiles) {
+                if (profile.uid) matchingCustomerUids.add(profile.uid);
+                if (profile._id) matchingCustomerUids.add(String(profile._id));
+              }
+            } catch (error) {
+              logger.warn('Customer profile lookup failed for payment search', {
+                message: (error as any)?.message,
+              });
+            }
+          })(),
+          (async () => {
+            try {
+              const tasks = await Task.find({ title: searchRegex }).select('_id').lean();
+              for (const task of tasks) {
+                matchingTaskIds.add(String(task._id));
+              }
+            } catch (error) {
+              logger.warn('Task title lookup failed for payment search', {
+                message: (error as any)?.message,
+              });
+            }
+          })(),
+        ]);
+      }
+
+      const upstreamParams: Record<string, any> = { ...(req.query as Record<string, any>) };
+      if (matchingCustomerUids.size > 0) {
+        upstreamParams.customerUids = Array.from(matchingCustomerUids).join(',');
+      }
+      if (matchingTaskIds.size > 0) {
+        upstreamParams.taskIds = Array.from(matchingTaskIds).join(',');
+      }
+
       const data = await safeGet<any>(
         '/api/v1/dashboard/all-transactions',
-        req.query as Record<string, any>,
+        upstreamParams,
         { success: true, total: 0, transactions: [] }
       );
 
       const rawTransactions = data.data ?? data.transactions ?? [];
-      const userCache = new Map<string, { userId?: string; name?: string }>();
-      const taskTitleCache = new Map<string, string>();
-
-      // Optimization: Extract all unique IDs to fetch in batch
-      const uniqueUids = new Set<string>();
-      const uniqueTaskIds = new Set<string>();
-
-      rawTransactions.forEach((row: any) => {
-        const posterUid = row.posterUid || row.CustomerUid;
-        if (posterUid) uniqueUids.add(posterUid);
-        if (row.performerUid) uniqueUids.add(row.performerUid);
-        if (row.taskId) uniqueTaskIds.add(row.taskId);
-      });
-
-      // Fetch in batch to avoid N+1 requests and slow individual stats lookups
-      await Promise.all([
-        (async () => {
-          if (uniqueUids.size > 0) {
-            try {
-              const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
-              const users = usersResult?.profiles || [];
-              users.forEach((u: any) => {
-                userCache.set(u.uid, {
-                  userId: u.uid,
-                  name: u.name,
-                });
-              });
-            } catch (err) {
-              logger.warn('Batch user resolution failed, falling back to individual lookups');
-            }
-          }
-        })(),
-        (async () => {
-          if (uniqueTaskIds.size > 0) {
-            try {
-              const tasksResult = await taskServiceClient.getTasksBatch(Array.from(uniqueTaskIds));
-              const tasks = tasksResult?.tasks || [];
-              tasks.forEach((t: any) => {
-                taskTitleCache.set(t._id || t.id, t.title);
-              });
-            } catch (err) {
-              logger.warn('Batch task resolution failed, falling back to individual lookups');
-            }
-          }
-        })(),
-      ]);
-
-      const resolveUser = async (
-        uid?: string
-      ): Promise<{ userId?: string; name?: string }> => {
-        if (!uid) return {};
-        if (userCache.has(uid)) {
-          return userCache.get(uid) || {};
-        }
-        try {
-          // Individual fallback if not in batch
-          const userResult = await userServiceClient.getUser(uid);
-          const exact = userResult?.data || userResult;
-          const resolved = {
-            userId: exact?.uid || exact?.userId || exact?._id,
-            name:
-              exact?.name ||
-              [exact?.firstName, exact?.lastName].filter(Boolean).join(' ') ||
-              undefined,
-          };
-          userCache.set(uid, resolved);
-          return resolved;
-        } catch (error) {
-          logger.warn(`Failed to resolve uid ${uid} to user details`);
-        }
-        return {};
-      };
-
-      const resolveTaskTitle = async (taskId?: string): Promise<string | undefined> => {
-        if (!taskId) return undefined;
-        if (taskTitleCache.has(taskId)) {
-          return taskTitleCache.get(taskId);
-        }
-        try {
-          // Individual fallback if not in batch
-          const taskResult = await taskServiceClient.getTask(taskId);
-          const taskData = taskResult?.data || taskResult;
-          const title = taskData?.title as string | undefined;
-          if (title) {
-            taskTitleCache.set(taskId, title);
-            return title;
-          }
-        } catch (error) {
-          logger.warn(`Failed to resolve task title for taskId ${taskId}`);
-        }
-        return undefined;
-      };
-
-      const transactions = await Promise.all(
-        rawTransactions.map(async (row: any) => {
-          const posterUid = row.posterUid || row.CustomerUid;
-          const [customer, helper, taskTitle] = await Promise.all([
-            resolveUser(posterUid),
-            resolveUser(row.performerUid),
-            resolveTaskTitle(row.taskId),
-          ]);
-
-          return {
-            ...row,
-            posterUid: posterUid,
-            links: {
-              customerUserId: customer.userId,
-              helperUserId: helper.userId,
-              taskId: row.taskId,
-              customerName: customer.name || posterUid,
-              taskTitle: taskTitle || row.taskId,
-              helperName: helper.name || row.performerUid,
-            },
-          };
-        })
+      const { userCache, taskTitleCache } = await enrichEntities(
+        rawTransactions.map((row: any) => row.taskId).filter(Boolean),
+        rawTransactions.flatMap((row: any) =>
+          [row.posterUid || row.CustomerUid, row.performerUid].filter(Boolean)
+        ),
       );
+
+      const transactions = rawTransactions.map((row: any) => {
+        const posterUid = row.posterUid || row.CustomerUid;
+        const customer = posterUid ? userCache.get(posterUid) : undefined;
+        const helper = row.performerUid ? userCache.get(row.performerUid) : undefined;
+        return {
+          ...row,
+          posterUid,
+          links: {
+            customerUserId: customer?.userId,
+            helperUserId: helper?.userId,
+            taskId: row.taskId,
+            customerName: customer?.name || posterUid,
+            taskTitle: taskTitleCache.get(row.taskId) || row.taskId,
+            helperName: helper?.name || row.performerUid,
+          },
+        };
+      });
 
       res.json({
         success: true,
