@@ -46,6 +46,10 @@ export class LocationPricingClient {
     return (await this.client.get('/api/v1/catalog/internal/location-pricing/skus', { params: { categoryId, sectionId } })).data;
   }
 
+  async updateSkuGlobalPrice(id: string, body: unknown) {
+    return (await this.client.patch(`/api/v1/catalog/internal/location-pricing/skus/${encodeURIComponent(id)}/global-price`, body)).data;
+  }
+
   async listHourlyPrices(skuId?: string) {
     return (await this.client.get('/api/v1/catalog/internal/location-pricing/hourly-prices', { params: { skuId } })).data;
   }

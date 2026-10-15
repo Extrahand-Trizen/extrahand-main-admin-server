@@ -19,6 +19,11 @@ router.post('/locations/:type/:id/deactivate', auditMiddleware('location.deactiv
 router.get('/hourly-skus', LocationPricingController.listHourlySkus);
 router.get('/categories', LocationPricingController.listPricingCategories);
 router.get('/skus', LocationPricingController.listPricingSkus);
+router.patch(
+  '/skus/:id/global-price',
+  auditMiddleware('sku.global_price.updated', 'sku', (req) => req.params.id),
+  LocationPricingController.updateSkuGlobalPrice,
+);
 router.get('/hourly-prices', LocationPricingController.listHourlyPrices);
 router.post('/hourly-prices', auditMiddleware('hourly_pricing.created', 'hourly_pricing'), LocationPricingController.createHourlyPrice);
 router.patch('/hourly-prices/:id', auditMiddleware('hourly_pricing.updated', 'hourly_pricing'), LocationPricingController.updateHourlyPrice);

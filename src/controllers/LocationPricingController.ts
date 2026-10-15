@@ -68,6 +68,14 @@ export class LocationPricingController {
     );
   }
 
+  static updateSkuGlobalPrice(req: Request, res: Response) {
+    return forward(
+      () => locationPricingClient.updateSkuGlobalPrice(String(req.params.id), req.body),
+      res,
+      'Update SKU global price',
+    );
+  }
+
   static listHourlyPrices(req: Request, res: Response) {
     return forward(() => locationPricingClient.listHourlyPrices(req.query.skuId ? String(req.query.skuId) : undefined), res, 'List hourly prices');
   }
