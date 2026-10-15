@@ -2,12 +2,9 @@ import { Request, Response } from 'express';
 import logger from '../config/logger';
 import { AadhaarKycAssignment } from '../models/AadhaarKycAssignment';
 import { KycReview } from '../models/KycReview';
+import { Profile } from '../models/Profile';
 import { userServiceClient } from '../services/UserServiceClient';
-import {
-  ensureKycAssigneeForUser,
-  listAadhaarKycRecipients,
-} from '../services/AadhaarKycRecipientService';
-import { DashboardType } from '../types/dashboard';
+import { ensureKycAssigneeForUser } from '../services/AadhaarKycRecipientService';
 
 const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
 
@@ -35,16 +32,264 @@ function requireAccess(req: Request, res: Response): boolean {
   return true;
 }
 
+const CACHE_TTL_MS = 30_000; // 30 seconds cache
+let cache: { rows: any[]; expiresAt: number } | null = null;
+let buildPromise: Promise<any[]> | null = null;
+let cacheVersion = 0;
+
 export class AadhaarFollowUpController {
   /**
+   * Invalidate the in-memory cache when assignments or follow-up statuses are updated
+   */
+  public static invalidateCache(): void {
+    cacheVersion += 1;
+    cache = null;
+    buildPromise = null;
+    logger.debug('AadhaarFollowUpController: cache invalidated');
+  }
+
+  /**
+   * Pre-warm cache on server startup
+   */
+  public static warmCache(): void {
+    AadhaarFollowUpController.getRows()
+      .then((rows) => {
+        logger.info(`✅ AadhaarFollowUpController: cache warmed with ${rows.length} rows`);
+      })
+      .catch((err) => {
+        logger.warn('AadhaarFollowUpController: failed to warm cache on startup', err);
+      });
+  }
+
+  /**
+   * Build complete rows from database directly
+   */
+  private static async buildRows(): Promise<any[]> {
+    let unverifiedHelpers: any[] = [];
+
+    // Step 1: Query unverified helpers directly from MongoDB (Profiles)
+    try {
+      const profiles = await Profile.find({
+        roles: { $in: ['tasker', 'both', 'helper'] },
+        isAadhaarVerified: false,
+      })
+        .select('uid name email phone createdAt aadhaarKyc')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      unverifiedHelpers = profiles.map((p) => ({
+        userId: String(p.uid || p._id || '').trim(),
+        name: p.name || 'Unknown',
+        email: p.email || '',
+        phone: p.phone || '',
+        createdAt: p.createdAt,
+        aadhaarKyc: p.aadhaarKyc,
+      }));
+    } catch (dbErr: any) {
+      logger.warn('AadhaarFollowUpController: direct Profile query failed, falling back to userServiceClient', dbErr);
+      // Fallback to user-service if direct DB read encounters an issue
+      try {
+        const pageSize = 200;
+        const firstResult = await userServiceClient.listUsers({
+          role: 'helper',
+          isAadhaarVerified: false,
+          page: 1,
+          limit: pageSize,
+          sortBy: 'createdAt',
+          sortOrder: 'desc',
+        });
+        const firstUsers = firstResult?.data || firstResult?.users || [];
+        unverifiedHelpers.push(...firstUsers);
+
+        const totalPages = firstResult?.pagination?.pages || 1;
+        if (totalPages > 1) {
+          const remainingPageNums = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+          const remainingResults = await Promise.all(
+            remainingPageNums.map((p) =>
+              userServiceClient.listUsers({
+                role: 'helper',
+                isAadhaarVerified: false,
+                page: p,
+                limit: pageSize,
+                sortBy: 'createdAt',
+                sortOrder: 'desc',
+              }),
+            ),
+          );
+          for (const res of remainingResults) {
+            const users = res?.data || res?.users || [];
+            if (Array.isArray(users)) unverifiedHelpers.push(...users);
+          }
+        }
+      } catch (svcErr: any) {
+        logger.error('AadhaarFollowUpController: fallback user service fetch also failed', svcErr);
+        throw svcErr;
+      }
+    }
+
+    const helperIds = unverifiedHelpers
+      .map((u) => String(u.userId || u.uid || u._id || '').trim())
+      .filter(Boolean);
+
+    // Step 2: Parallel fetch of assignments and review statuses with minimal projection
+    const [existingAssignments, reviewDocs] = await Promise.all([
+      AadhaarKycAssignment.find({ userId: { $in: helperIds } })
+        .select('userId assignedToUserId assignedToName assignedToEmail')
+        .lean(),
+      KycReview.find({ userId: { $in: helperIds } })
+        .select('userId reviewStatus followUpStatus followUpDate reviewedBy reviewedAt')
+        .lean(),
+    ]);
+
+    const assignmentMap = new Map<string, any>();
+    for (const a of existingAssignments) {
+      assignmentMap.set(a.userId, a);
+    }
+
+    const reviewMap = new Map<string, any>();
+    for (const r of reviewDocs) {
+      if (!reviewMap.has(r.userId)) {
+        reviewMap.set(r.userId, r);
+      }
+    }
+
+    // Step 3: Schedule background round-robin assignments for unassigned helpers (fire-and-forget)
+    const unassignedIds = helperIds.filter((id) => !assignmentMap.has(id));
+    if (unassignedIds.length > 0) {
+      (async () => {
+        const BATCH = 10;
+        for (let i = 0; i < unassignedIds.length; i += BATCH) {
+          const batch = unassignedIds.slice(i, i + BATCH);
+          await Promise.allSettled(
+            batch.map((userId) =>
+              ensureKycAssigneeForUser(userId).catch((err) =>
+                logger.warn('AadhaarFollowUpController: failed to assign helper', {
+                  userId,
+                  error: err.message,
+                }),
+              ),
+            ),
+          );
+        }
+      })();
+    }
+
+    // Step 4: Map compiled rows
+    const rows: any[] = [];
+    for (const user of unverifiedHelpers) {
+      const userId = String(user.userId || user.uid || user._id || '').trim();
+      if (!userId) continue;
+
+      const assignment = assignmentMap.get(userId);
+      const review = reviewMap.get(userId);
+
+      const assignedTo = assignment
+        ? [
+            {
+              userId: assignment.assignedToUserId,
+              name: assignment.assignedToName,
+              email: assignment.assignedToEmail,
+            },
+          ]
+        : [];
+
+      const followUpStatus: string = review?.followUpStatus || 'none';
+      const reviewStatus: string = review?.reviewStatus || 'pending';
+      const followUpDate = review?.followUpDate
+        ? review.followUpDate instanceof Date
+          ? review.followUpDate.toISOString()
+          : String(review.followUpDate)
+        : null;
+
+      rows.push({
+        notificationId: userId,
+        userId,
+        userName: String(user.name || user.displayName || 'Unknown'),
+        userEmail: String(user.email || ''),
+        userPhone: String(user.phone || ''),
+        registeredAt: user.createdAt
+          ? user.createdAt instanceof Date
+            ? user.createdAt.toISOString()
+            : String(user.createdAt)
+          : '',
+        aadhaar: String(user.aadhaarKyc?.visibleStatus || user.aadhaarKyc?.status || 'Not verified'),
+        failureReason: String(user.aadhaarKyc?.failureReason || ''),
+        failedOn: user.aadhaarKyc?.updatedAt || null,
+        aadhaarUpdatedAt: user.aadhaarKyc?.updatedAt || null,
+        followUpStatus,
+        followUpDate,
+        assignedTo,
+        reviewStatus,
+        reviewedBy: review?.reviewedBy || null,
+        reviewedAt: review?.reviewedAt || null,
+        sessionId: String(user.aadhaarKyc?.verificationId || user.aadhaarKyc?.id || ''),
+        verificationId: String(user.aadhaarKyc?.verificationId || ''),
+        isAadhaarVerified: false,
+        isManualUpload: false,
+        uploadedBy: null,
+        uploadedAt: null,
+        documents: [],
+        profileUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
+      });
+    }
+
+    return rows;
+  }
+
+  /**
+   * Get cached rows with stale-while-revalidate so requests are ALWAYS instant
+   */
+  public static async getRows(): Promise<any[]> {
+    const now = Date.now();
+
+    // 1. Fresh cache: return immediately (< 10ms)
+    if (cache && cache.expiresAt > now) {
+      return cache.rows;
+    }
+
+    // 2. Stale-while-revalidate: serve stale cache immediately while refreshing in background
+    if (cache && cache.rows.length > 0) {
+      if (!buildPromise) {
+        const currentVersion = cacheVersion;
+        buildPromise = AadhaarFollowUpController.buildRows()
+          .then((newRows) => {
+            if (currentVersion === cacheVersion) {
+              cache = { rows: newRows, expiresAt: Date.now() + CACHE_TTL_MS };
+            }
+            return newRows;
+          })
+          .catch((err) => {
+            logger.warn('AadhaarFollowUpController: background refresh failed', err);
+            return cache!.rows;
+          })
+          .finally(() => {
+            buildPromise = null;
+          });
+      }
+      return cache.rows;
+    }
+
+    // 3. Cold start: only on initial boot before cache is populated
+    if (buildPromise) {
+      return buildPromise;
+    }
+
+    const currentVersion = cacheVersion;
+    buildPromise = AadhaarFollowUpController.buildRows();
+
+    try {
+      const rows = await buildPromise;
+      if (currentVersion === cacheVersion) {
+        cache = { rows, expiresAt: Date.now() + CACHE_TTL_MS };
+      }
+      return rows;
+    } finally {
+      buildPromise = null;
+    }
+  }
+
+  /**
    * GET /api/v1/aadhaar-followups
-   *
-   * Returns ALL helpers whose Aadhaar is not verified, with equal round-robin
-   * assignment across the 3 operations admins. Each helper is assigned exactly
-   * once (sticky); subsequent calls return the same assignment.
-   *
-   * Supports: search, statusFilter, sortOrder (newest/oldest), page, limit,
-   *           and assignedTo filtering (ops admin userId).
    */
   static async list(req: Request, res: Response): Promise<void> {
     if (!requireAccess(req, res)) return;
@@ -55,156 +300,17 @@ export class AadhaarFollowUpController {
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
       const assignedToFilter = String(req.query.assignedTo || 'all').trim();
-
-      // Follow-up status filter (from the frontend status filter values)
       const followUpStatusFilter = String(req.query.followUpStatus || 'all').trim();
       const reviewStatusFilter = String(req.query.reviewStatus || 'all').trim();
 
-      // ── Step 1: Fetch ALL helpers with Aadhaar not verified from user-service ──
-      // We paginate at the user-service level with a large limit to get all unverified helpers.
-      // User service supports isAadhaarVerified filter and role=helper filter.
-      let allUnverifiedHelpers: any[] = [];
-      try {
-        let currentPage = 1;
-        const pageSize = 100;
-        while (true) {
-          const result = await userServiceClient.listUsers({
-            role: 'helper',
-            isAadhaarVerified: false,
-            page: currentPage,
-            limit: pageSize,
-            sortBy: 'createdAt',
-            sortOrder: 'desc',
-          });
-
-          const users = result?.data || result?.users || [];
-          if (!Array.isArray(users) || users.length === 0) break;
-          allUnverifiedHelpers.push(...users);
-
-          const pagination = result?.pagination;
-          if (!pagination || currentPage >= pagination.pages) break;
-          currentPage++;
-        }
-      } catch (err: any) {
-        logger.error('AadhaarFollowUpController: failed to fetch unverified helpers', {
-          error: err.message,
-        });
-        res.status(500).json({ success: false, error: 'Failed to fetch unverified helpers' });
-        return;
-      }
-
-      // ── Step 2: Ensure every helper has an assignment (round-robin, idempotent) ──
-      // We do this in batches to avoid overwhelming the DB.
-      // For operations admins (non-super-admin), we only need to process helpers
-      // assigned to them — but we still need to ensure all assignments exist first.
       const myAdminId = req.admin!.userId;
       const isSuperOrPlatform = isAllReviewsRole(req);
 
-      // Collect all userIds
-      const helperIds = allUnverifiedHelpers.map((u: any) =>
-        String(u.userId || u._id || u.id || '').trim(),
-      ).filter(Boolean);
+      // Fast retrieval from in-memory cache or direct DB
+      const allRows = await AadhaarFollowUpController.getRows();
+      let rows = allRows;
 
-      // Fetch all existing assignments in one query
-      const existingAssignments = await AadhaarKycAssignment.find({
-        userId: { $in: helperIds },
-      }).lean();
-      const assignmentMap = new Map<string, any>();
-      for (const a of existingAssignments) {
-        assignmentMap.set(a.userId, a);
-      }
-
-      // Assign any helpers that don't have an assignment yet
-      const unassignedIds = helperIds.filter((id) => !assignmentMap.has(id));
-      if (unassignedIds.length > 0) {
-        logger.info(`AadhaarFollowUpController: assigning ${unassignedIds.length} new helpers via round-robin`);
-        for (const userId of unassignedIds) {
-          try {
-            const assignee = await ensureKycAssigneeForUser(userId);
-            if (assignee) {
-              assignmentMap.set(userId, {
-                userId,
-                assignedToUserId: assignee.userId,
-                assignedToEmail: assignee.email,
-                assignedToName: assignee.name,
-              });
-            }
-          } catch (assignErr: any) {
-            logger.warn('AadhaarFollowUpController: failed to assign helper', {
-              userId,
-              error: assignErr.message,
-            });
-          }
-        }
-      }
-
-      // ── Step 3: Fetch KycReview docs for follow-up status ──
-      const reviewDocs = await KycReview.find({ userId: { $in: helperIds } })
-        .sort({ updatedAt: -1 })
-        .lean();
-      const reviewMap = new Map<string, any>();
-      for (const r of reviewDocs) {
-        // Keep the most recent review per userId
-        if (!reviewMap.has(r.userId)) {
-          reviewMap.set(r.userId, r);
-        }
-      }
-
-      // ── Step 4: Build response rows ──
-      let rows: any[] = [];
-      for (const user of allUnverifiedHelpers) {
-        const userId = String(user.userId || user._id || user.id || '').trim();
-        if (!userId) continue;
-
-        const assignment = assignmentMap.get(userId);
-        const review = reviewMap.get(userId);
-
-        const assignedTo = assignment
-          ? [
-              {
-                userId: assignment.assignedToUserId,
-                name: assignment.assignedToName,
-                email: assignment.assignedToEmail,
-              },
-            ]
-          : [];
-
-        const followUpStatus: string = review?.followUpStatus || 'none';
-        const reviewStatus: string = review?.reviewStatus || 'pending';
-        const followUpDate = review?.followUpDate
-          ? review.followUpDate.toISOString?.() || String(review.followUpDate)
-          : null;
-
-        rows.push({
-          // Use userId as notificationId to satisfy the frontend type
-          notificationId: userId,
-          userId,
-          userName: String(user.name || user.displayName || 'Unknown'),
-          userEmail: String(user.email || ''),
-          userPhone: String(user.phone || ''),
-          registeredAt: String(user.createdAt || user.created_at || ''),
-          aadhaar: String(user.aadhaarKyc?.visibleStatus || user.aadhaarKyc?.status || 'Not verified'),
-          failureReason: String(user.aadhaarKyc?.failureReason || ''),
-          failedOn: user.aadhaarKyc?.updatedAt || null,
-          aadhaarUpdatedAt: user.aadhaarKyc?.updatedAt || null,
-          followUpStatus,
-          followUpDate,
-          assignedTo,
-          reviewStatus,
-          reviewedBy: review?.reviewedBy || null,
-          reviewedAt: review?.reviewedAt || null,
-          sessionId: String(user.aadhaarKyc?.verificationId || user.aadhaarKyc?.id || ''),
-          verificationId: String(user.aadhaarKyc?.verificationId || ''),
-          isAadhaarVerified: false,
-          isManualUpload: false,
-          uploadedBy: null,
-          uploadedAt: null,
-          documents: [],
-          profileUrl: `/users/${encodeURIComponent(userId)}?tab=verification`,
-        });
-      }
-
-      // ── Step 5: Filter by assigned ops admin (for non-super-admins only see their own) ──
+      // Filter by assigned ops admin
       if (!isSuperOrPlatform) {
         rows = rows.filter((row) =>
           row.assignedTo.some((a: any) => a.userId === myAdminId),
@@ -215,10 +321,12 @@ export class AadhaarFollowUpController {
         );
       }
 
-      // ── Step 6: Apply status filters ──
+      // Filter by followUpStatus
       if (followUpStatusFilter !== 'all') {
         rows = rows.filter((row) => row.followUpStatus === followUpStatusFilter);
       }
+
+      // Filter by reviewStatus
       if (reviewStatusFilter !== 'all') {
         if (reviewStatusFilter === 'pending') {
           rows = rows.filter(
@@ -232,7 +340,7 @@ export class AadhaarFollowUpController {
         }
       }
 
-      // ── Step 7: Search filter ──
+      // Filter by search
       if (search) {
         rows = rows.filter((row) =>
           [
@@ -248,15 +356,15 @@ export class AadhaarFollowUpController {
         );
       }
 
-      // ── Step 8: Sort ──
-      rows.sort((a, b) => {
+      // Sort
+      rows = [...rows].sort((a, b) => {
         const aDate = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
         const bDate = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
         if (sortOrder === 'oldest') return aDate - bDate;
         return bDate - aDate;
       });
 
-      // ── Step 9: Paginate ──
+      // Paginate
       const total = rows.length;
       const startIndex = (page - 1) * limit;
       const paginatedRows = rows.slice(startIndex, startIndex + limit);
@@ -265,12 +373,7 @@ export class AadhaarFollowUpController {
       res.json({
         success: true,
         data: paginatedRows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages,
-        },
+        pagination: { page, limit, total, pages },
       });
     } catch (error: any) {
       logger.error('AadhaarFollowUpController.list error:', error);

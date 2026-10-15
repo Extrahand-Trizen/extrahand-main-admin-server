@@ -59,6 +59,9 @@ const KycSessionSchema = new Schema<KycSessionDocument>(
   },
 );
 
+KycSessionSchema.index({ sessionType: 1, visibleStatus: 1, userId: 1 });
+KycSessionSchema.index({ userId: 1, sessionType: 1, updatedAt: -1, createdAt: -1, _id: -1 });
+
 function getKycSessionModel(): Model<KycSessionDocument> {
   const dbName = getKycVerificationDbName();
   const connection = mongoose.connection.useDb(dbName, { useCache: true });

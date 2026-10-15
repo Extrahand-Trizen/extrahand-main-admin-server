@@ -3,6 +3,8 @@ import { connectDatabase, disconnectDatabase } from './config/database';
 import logger from './config/logger';
 import { env } from './config/env';
 import { minioService } from './services/MinioService';
+import { AadhaarFollowUpController } from './controllers/AadhaarFollowUpController';
+import { KycReviewController } from './controllers/KycReviewController';
 
 const PORT = env.PORT;
 
@@ -11,6 +13,10 @@ connectDatabase()
   .then(() => {
     // Initialize MinIO service for KYC vault presigned URLs
     minioService.initialize();
+
+    // Pre-warm caches in background
+    AadhaarFollowUpController.warmCache();
+    KycReviewController.warmCache();
 
     // Start server
     const server = app.listen(PORT, () => {

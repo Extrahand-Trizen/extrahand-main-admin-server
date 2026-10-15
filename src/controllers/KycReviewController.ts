@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import logger from '../config/logger';
 import { AdminNotification } from '../models/AdminNotification';
 import { AdminUser } from '../models/AdminUser';
+import { Profile } from '../models/Profile';
 import { KycFollowUpStatus, KycReview, KycReviewStatus } from '../models/KycReview';
 import { KycSession } from '../models/KycSession';
 import { DashboardType } from '../types/dashboard';
@@ -10,6 +11,7 @@ import { userServiceClient } from '../services/UserServiceClient';
 import { minioService } from '../services/MinioService';
 import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
 import { listAllAadhaarKycAdmins } from '../services/AadhaarKycRecipientService';
+import { AadhaarFollowUpController } from './AadhaarFollowUpController';
 
 const AADHAAR_NOTIFICATION_TYPES = [
   'aadhaar_verification_failed',
@@ -323,16 +325,32 @@ async function getAadhaarDocuments(
     .filter((item: { label: string; url: string }) => item.url);
 }
 
-async function buildReviewRows(req: Request) {
+async function buildReviewRows() {
   // Notification-driven approach: only show users who have triggered an Aadhaar
   // KYC review event (aadhaar_verification_failed or aadhaar_verification_under_review).
-  const notifications = await AdminNotification.find({
-    dashboardType: DashboardType.MAIN_ADMIN,
-    type: { $in: AADHAAR_NOTIFICATION_TYPES },
-  })
-    .sort({ createdAt: -1 })
-    .limit(500)
-    .lean();
+  // Parallelize notifications, pending reviews, and session userIds
+  const [notifications, pendingReviews, sessionUserIds] = await Promise.all([
+    AdminNotification.find({
+      dashboardType: DashboardType.MAIN_ADMIN,
+      type: { $in: AADHAAR_NOTIFICATION_TYPES },
+    })
+      .sort({ createdAt: -1 })
+      .limit(300)
+      .select('_id metadata createdAt type dashboardType')
+      .lean(),
+    KycReview.find({
+      $or: [
+        { reviewStatus: 'pending' },
+        { followUpStatus: 'followup_uploaded' },
+      ],
+    })
+      .select('userId')
+      .lean(),
+    KycSession.distinct('userId', {
+      sessionType: 'aadhaar_ocr',
+      visibleStatus: { $in: ['expired', 'under_review', 'failed', 'rejected', 'pending'] },
+    }),
+  ]);
 
   const latestByUserId = new Map<string, any>();
   for (const notification of notifications) {
@@ -341,59 +359,104 @@ async function buildReviewRows(req: Request) {
     latestByUserId.set(userId, notification);
   }
 
-  // Also query KycReview and KycSession to collect other userIds (expired and reuploadeds)
-  const [pendingReviews, kycSessions] = await Promise.all([
-    KycReview.find({
-      $or: [
-        { reviewStatus: 'pending' },
-        { followUpStatus: 'followup_uploaded' },
-      ],
-    }).lean(),
-    KycSession.find({
-      sessionType: { $regex: '^aadhaar', $options: 'i' },
-      visibleStatus: { $in: ['expired', 'under_review', 'failed', 'rejected', 'pending'] },
-    }).lean(),
-  ]);
-
   const userIdsSet = new Set<string>(latestByUserId.keys());
   for (const review of pendingReviews) {
     const userId = String(review.userId || '').trim();
     if (userId) userIdsSet.add(userId);
   }
-  for (const session of kycSessions) {
-    const userId = String(session.userId || '').trim();
+  for (const sessionUserId of sessionUserIds) {
+    const userId = String(sessionUserId || '').trim();
     if (userId) userIdsSet.add(userId);
   }
 
   const userIds = Array.from(userIdsSet);
+  const objectIdUserIds = userIds.filter((userId) => /^[0-9a-fA-F]{24}$/.test(userId));
+  const profiles = userIds.length > 0
+    ? await Profile.find({
+        $or: [
+          { uid: { $in: userIds } },
+          ...(objectIdUserIds.length > 0
+            ? [{ _id: { $in: objectIdUserIds } }]
+            : []),
+        ],
+      })
+        .select('uid name email phone createdAt isAadhaarVerified maskedAadhaar')
+        .lean()
+    : [];
 
-  // Resolve all user profiles and UIDs to avoid mismatches in parallel
-  const resolvedUsers = await Promise.all(
-    userIds.map(async (userId) => {
-      let user: any = null;
-      try {
-        const result = await userServiceClient.getUser(userId, req.admin!.userId);
-        user = result?.data || result;
-      } catch (error: any) {
-        logger.warn('KYC review user enrichment failed', {
-          userId,
-          error: error.message,
-        });
-      }
-      const profileUid = resolveProfileUid(user, userId);
-      return { userId, user, profileUid };
-    })
-  );
-
-  const resolvedUserMap = new Map<string, { user: any; profileUid: string }>();
-  const allLookupIds = new Set<string>();
-  for (const item of resolvedUsers) {
-    resolvedUserMap.set(item.userId, { user: item.user, profileUid: item.profileUid });
-    allLookupIds.add(item.userId);
-    allLookupIds.add(item.profileUid);
+  const profileById = new Map<string, any>();
+  const profileUids = new Set<string>();
+  for (const profile of profiles) {
+    const profileUid = resolveProfileUid(profile, String(profile._id));
+    profileById.set(profileUid, profile);
+    profileById.set(String(profile._id), profile);
+    profileUids.add(profileUid);
   }
 
-  const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
+  const [reviewDocs, aadhaarSessions] = await Promise.all([
+    KycReview.find({ userId: { $in: Array.from(new Set([...userIds, ...profileUids])) } })
+      .select('userId sessionId reviewStatus followUpStatus followUpDate rejectionReason reviewedBy reviewedAt uploadedBy uploadedAt claimedBy claimedAt')
+      .lean(),
+    profileUids.size > 0
+      ? KycSession.aggregate([
+          {
+            $match: {
+              userId: { $in: Array.from(profileUids) },
+              sessionType: 'aadhaar_ocr',
+            },
+          },
+          { $sort: { userId: 1, updatedAt: -1, createdAt: -1, _id: -1 } },
+          { $group: { _id: '$userId', session: { $first: '$$ROOT' } } },
+          { $replaceRoot: { newRoot: '$session' } },
+          {
+            $project: {
+              userId: 1,
+              verification_id: 1,
+              sessionType: 1,
+              status: 1,
+              internalStatus: 1,
+              visibleStatus: 1,
+              failureReason: 1,
+              visibleFailureAt: 1,
+              updatedAt: 1,
+              maskedAadhaar: 1,
+              createdAt: 1,
+            },
+          },
+        ])
+      : Promise.resolve([]),
+  ]);
+
+  const latestSessionByUserId = new Map<string, any>();
+  for (const session of aadhaarSessions) {
+    if (!latestSessionByUserId.has(String(session.userId))) {
+      latestSessionByUserId.set(String(session.userId), session);
+    }
+  }
+
+  const resolvedUserMap = new Map<string, { user: any; profileUid: string }>();
+  for (const userId of userIds) {
+    const profile = profileById.get(userId);
+    const profileUid = profile ? resolveProfileUid(profile, userId) : userId;
+    const aadhaarKyc = latestSessionByUserId.get(profileUid);
+    resolvedUserMap.set(userId, {
+      user: profile
+        ? {
+            ...profile,
+            userId: profileUid,
+            aadhaarKyc: aadhaarKyc
+              ? {
+                  ...aadhaarKyc,
+                  id: String(aadhaarKyc._id),
+                  verificationId: aadhaarKyc.verification_id,
+                }
+              : null,
+          }
+        : null,
+      profileUid,
+    });
+  }
+
   const reviewMap = new Map<string, any>();
   for (const review of reviewDocs) {
     reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
@@ -403,7 +466,7 @@ async function buildReviewRows(req: Request) {
     fallbackReviewMap.set(review.userId, review);
   }
 
-  const rowPromises = userIds.map(async (userId) => {
+  const rows = userIds.map((userId) => {
     const notification = latestByUserId.get(userId);
     const resolved = resolvedUserMap.get(userId);
     const user = resolved?.user || null;
@@ -493,8 +556,69 @@ async function buildReviewRows(req: Request) {
     };
   });
 
-  const rows = await Promise.all(rowPromises);
   return rows;
+}
+
+const REVIEW_ROWS_CACHE_TTL_MS = 30_000;
+let reviewRowsCache: { rows: any[]; expiresAt: number } | null = null;
+let reviewRowsBuildPromise: Promise<any[]> | null = null;
+let reviewRowsCacheVersion = 0;
+
+function invalidateReviewRowsCache(): void {
+  reviewRowsCacheVersion += 1;
+  reviewRowsCache = null;
+  reviewRowsBuildPromise = null;
+  AadhaarFollowUpController.invalidateCache();
+}
+
+async function getReviewRows(): Promise<any[]> {
+  const now = Date.now();
+
+  // 1. Fresh cache: return immediately (< 1ms)
+  if (reviewRowsCache && reviewRowsCache.expiresAt > now) {
+    return reviewRowsCache.rows;
+  }
+
+  // 2. Stale-while-revalidate: serve stale cache immediately, refresh in background
+  if (reviewRowsCache && reviewRowsCache.rows.length > 0) {
+    if (!reviewRowsBuildPromise) {
+      const version = reviewRowsCacheVersion;
+      reviewRowsBuildPromise = buildReviewRows()
+        .then((newRows) => {
+          if (version === reviewRowsCacheVersion) {
+            reviewRowsCache = { rows: newRows, expiresAt: Date.now() + REVIEW_ROWS_CACHE_TTL_MS };
+          }
+          return newRows;
+        })
+        .catch((err) => {
+          logger.warn('KycReviewController: background review rows refresh failed', err);
+          return reviewRowsCache!.rows;
+        })
+        .finally(() => {
+          reviewRowsBuildPromise = null;
+        });
+    }
+    return reviewRowsCache.rows;
+  }
+
+  // 3. Cold start: wait for build
+  if (reviewRowsBuildPromise) return reviewRowsBuildPromise;
+
+  const version = reviewRowsCacheVersion;
+  const buildPromise = buildReviewRows();
+  reviewRowsBuildPromise = buildPromise;
+
+  try {
+    const rows = await buildPromise;
+    if (version === reviewRowsCacheVersion) {
+      reviewRowsCache = { rows, expiresAt: Date.now() + REVIEW_ROWS_CACHE_TTL_MS };
+    }
+    return rows;
+  } finally {
+    if (reviewRowsBuildPromise === buildPromise) {
+      reviewRowsBuildPromise = null;
+    }
+  }
 }
 
 /**
@@ -688,6 +812,19 @@ function newAdminUploadSessionId(userId: string): string {
  */
 
 export class KycReviewController {
+  /**
+   * Pre-warm KYC review cache on server startup
+   */
+  public static warmCache(): void {
+    getReviewRows()
+      .then((rows) => {
+        logger.info(`✅ KycReviewController: cache warmed with ${rows.length} rows`);
+      })
+      .catch((err) => {
+        logger.warn('KycReviewController: failed to warm cache on startup', err);
+      });
+  }
+
   /** Returns existing upload info so the UI can show "Re-upload" if photos exist. */
   static async getUploadStatus(req: Request, res: Response): Promise<void> {
     if (!requireKycReviewAccess(req, res)) return;
@@ -835,6 +972,7 @@ export class KycReviewController {
             },
             { upsert: true, new: true, setDefaultsOnInsert: true },
           );
+          invalidateReviewRowsCache();
         } catch (reviewErr: any) {
           logger.warn('Failed to upsert KycReview after admin upload', {
             userId,
@@ -898,7 +1036,7 @@ export class KycReviewController {
       const page = Math.max(1, parseInt(String(req.query.page || '1')));
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
-      let rows = await buildReviewRows(req);
+      let rows = await getReviewRows();
 
       // Filter: operations admin only sees unclaimed reviews
       if (!req.admin?.isSuperAdmin) {
@@ -947,24 +1085,21 @@ export class KycReviewController {
         );
       }
 
-      // Sort by the most recent Aadhaar-related event timestamp.
-      // For manual admin uploads: use uploadedAt (the upload event).
-      // For all others: use aadhaarUpdatedAt (the notification/event time — failure, review, etc.).
-      // This is consistent between environments and prevents accepted/verified users from
-      // sorting above pending ones due to a recent aadhaarKyc.updatedAt verification timestamp.
+      // Sort by the displayed date in the table:
+      // For manual admin uploads: uploadedAt
+      // For all others: failedOn (fallback to aadhaarUpdatedAt or registeredAt)
       rows.sort((a, b) => {
-        const aTime = a.isManualUpload
-          ? (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
-          : (a.aadhaarUpdatedAt ? new Date(a.aadhaarUpdatedAt).getTime() : 0);
-        const bTime = b.isManualUpload
-          ? (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
-          : (b.aadhaarUpdatedAt ? new Date(b.aadhaarUpdatedAt).getTime() : 0);
+        const getRowTime = (row: any) => {
+          const primaryDate = row.isManualUpload ? row.uploadedAt : (row.failedOn || row.aadhaarUpdatedAt);
+          const time = primaryDate ? new Date(primaryDate).getTime() : 0;
+          return time || (row.registeredAt ? new Date(row.registeredAt).getTime() : 0);
+        };
 
-        const aDate = aTime || (a.registeredAt ? new Date(a.registeredAt).getTime() : 0);
-        const bDate = bTime || (b.registeredAt ? new Date(b.registeredAt).getTime() : 0);
+        const aTime = getRowTime(a);
+        const bTime = getRowTime(b);
 
-        if (sortOrder === 'oldest') return aDate - bDate;
-        return bDate - aDate;
+        if (sortOrder === 'oldest') return aTime - bTime;
+        return bTime - aTime;
       });
 
       // Paginate
@@ -1059,6 +1194,7 @@ export class KycReviewController {
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },
       ).lean();
+      invalidateReviewRowsCache();
 
       res.json({
         success: true,
@@ -1126,6 +1262,7 @@ export class KycReviewController {
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },
       ).lean();
+      invalidateReviewRowsCache();
 
       res.json({ success: true, data: review });
     } catch (error: any) {
@@ -1177,6 +1314,7 @@ export class KycReviewController {
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },
       ).lean();
+      invalidateReviewRowsCache();
 
       res.json({ success: true, data: review });
     } catch (error: any) {
@@ -1224,6 +1362,7 @@ export class KycReviewController {
         review.claimedAt = new Date();
         await review.save();
       }
+      invalidateReviewRowsCache();
 
       res.json({ success: true, data: review });
     } catch (error: any) {
@@ -1263,6 +1402,7 @@ export class KycReviewController {
       review.claimedBy = undefined;
       review.claimedAt = undefined;
       await review.save();
+      invalidateReviewRowsCache();
 
       res.json({ success: true, data: review });
     } catch (error: any) {
@@ -1317,6 +1457,7 @@ export class KycReviewController {
       };
       review.claimedAt = new Date();
       await review.save();
+      invalidateReviewRowsCache();
 
       res.json({ success: true, data: review });
     } catch (error: any) {
@@ -1422,20 +1563,21 @@ export class KycReviewController {
         );
       }
 
-      // Sort
+      // Sort by the displayed date in the table:
+      // For manual admin uploads: uploadedAt
+      // For all others: failedOn (fallback to aadhaarUpdatedAt or registeredAt)
       rows.sort((a, b) => {
-        const aTime = a.isManualUpload
-          ? (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0)
-          : (a.aadhaarUpdatedAt ? new Date(a.aadhaarUpdatedAt).getTime() : 0);
-        const bTime = b.isManualUpload
-          ? (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0)
-          : (b.aadhaarUpdatedAt ? new Date(b.aadhaarUpdatedAt).getTime() : 0);
+        const getRowTime = (row: any) => {
+          const primaryDate = row.isManualUpload ? row.uploadedAt : (row.failedOn || row.aadhaarUpdatedAt);
+          const time = primaryDate ? new Date(primaryDate).getTime() : 0;
+          return time || (row.registeredAt ? new Date(row.registeredAt).getTime() : 0);
+        };
 
-        const aDate = aTime || (a.registeredAt ? new Date(a.registeredAt).getTime() : 0);
-        const bDate = bTime || (b.registeredAt ? new Date(b.registeredAt).getTime() : 0);
+        const aTime = getRowTime(a);
+        const bTime = getRowTime(b);
 
-        if (sortOrder === 'oldest') return aDate - bDate;
-        return bDate - aDate;
+        if (sortOrder === 'oldest') return aTime - bTime;
+        return bTime - aTime;
       });
 
       const total = rows.length;
