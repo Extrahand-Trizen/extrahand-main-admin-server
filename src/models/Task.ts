@@ -12,7 +12,7 @@ const TaskSchema = new Schema<TaskDocument>(
     assigneeUid: { type: String },
     assigneeId: { type: Schema.Types.ObjectId },
   },
-  { collection: 'tasks' },
+  { collection: 'tasks', strict: false },
 );
 
 export const Task: Model<TaskDocument> =

@@ -5,6 +5,7 @@ import { env } from './config/env';
 import { minioService } from './services/MinioService';
 import { AadhaarFollowUpController } from './controllers/AadhaarFollowUpController';
 import { KycReviewController } from './controllers/KycReviewController';
+import { TaskManagementController } from './controllers/TaskManagementController';
 
 const PORT = env.PORT;
 
@@ -17,6 +18,7 @@ connectDatabase()
     // Pre-warm caches in background
     AadhaarFollowUpController.warmCache();
     KycReviewController.warmCache();
+    TaskManagementController.warmCache();
 
     // Start server
     const server = app.listen(PORT, () => {

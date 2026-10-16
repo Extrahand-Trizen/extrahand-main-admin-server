@@ -5,6 +5,7 @@ import { TaskCallRecord, TaskCallStatus } from '../models/TaskCallRecord';
 import { DashboardType } from '../types/dashboard';
 import { taskServiceClient } from '../services/TaskServiceClient';
 import { userServiceClient } from '../services/UserServiceClient';
+import { TaskManagementController } from './TaskManagementController';
 
 const STATUSES: TaskCallStatus[] = [
   'not_updated',
@@ -281,6 +282,8 @@ export class TaskCallController {
         },
         { new: true, upsert: true, setDefaultsOnInsert: true },
       ).lean();
+
+      TaskManagementController.invalidateCache();
 
       res.json({ success: true, data: record });
     } catch (error: any) {
