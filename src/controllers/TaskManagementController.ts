@@ -1004,8 +1004,46 @@ export class TaskManagementController {
   static async updateTask(req: Request, res: Response): Promise<void> {
     try {
       const { taskId } = req.params;
-      
-      const result = await taskServiceClient.updateTask(taskId, req.body);
+      const updates = req.body || {};
+
+      if (Object.prototype.hasOwnProperty.call(updates, 'status')) {
+        if (Object.keys(updates).some((key) => key !== 'status')) {
+          res.status(400).json({
+            success: false,
+            error: 'Works status must be updated separately from other task fields',
+          });
+          return;
+        }
+
+        if (!req.admin?.isSuperAdmin) {
+          res.status(403).json({
+            success: false,
+            error: 'Only Super Admin can update works status',
+          });
+          return;
+        }
+
+        const validStatuses = [
+          'open',
+          'assigned',
+          'started',
+          'in_progress',
+          'review',
+          'completed',
+          'cancelled',
+        ];
+        if (!validStatuses.includes(updates.status)) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid works status',
+          });
+          return;
+        }
+      }
+
+      const result = Object.prototype.hasOwnProperty.call(updates, 'status')
+        ? await taskServiceClient.updateTaskStatus(taskId, updates.status)
+        : await taskServiceClient.updateTask(taskId, updates);
       TaskManagementController.invalidateCache();
       
       await createAuditLog(
@@ -1013,7 +1051,7 @@ export class TaskManagementController {
         `${Resource.TASK}.update`,
         Resource.TASK,
         taskId,
-        { updates: req.body }
+        { updates }
       );
       
       res.json({

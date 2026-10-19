@@ -152,6 +152,11 @@ export class TaskServiceClient {
     const response = await this.client.patch(`/api/v1/tasks/${taskId}`, updates);
     return response.data;
   }
+
+  async updateTaskStatus(taskId: string, status: string): Promise<any> {
+    const response = await this.client.patch(`/api/v1/tasks/${taskId}/status`, { status });
+    return response.data;
+  }
   
   /**
    * Delete task (admin call — task-service detects X-Service-Name: main-admin-service and bypasses requester check)
