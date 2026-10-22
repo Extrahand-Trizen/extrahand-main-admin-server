@@ -899,21 +899,32 @@ export class TaskManagementController {
       
       const result = await taskServiceClient.getTask(taskId);
       const normalizedTask = result?.data ? normalizeTask(result.data) : normalizeTask(result);
+      const requesterId = normalizeTaskIdForAssignment(
+        normalizedTask.CustomerId || normalizedTask.customerId || normalizedTask.requesterId,
+      );
 
-      // Run all three enrichment operations in parallel — they are independent of each other.
+      // Run task, assignment, and poster metadata enrichment in parallel.
       // Previously they ran sequentially which caused 10+ second load times because each
       // awaited the previous (DB query → admin-service DB query → user-service HTTP call).
-      const [withCallStatus, withAssignedTo, withAssigneeName] = await Promise.all([
+      const [withCallStatus, withAssignedTo, withAssigneeName, customerProfileBatch, emailSettings] = await Promise.all([
         enrichTasksWithTaskCallStatus([normalizedTask]),
         enrichTasksWithAssignedTo([normalizedTask]),
         enrichTasksWithAssigneeName([normalizedTask]),
+        requesterId ? userServiceClient.getProfilesBatch([requesterId]) : Promise.resolve(null),
+        getTaskPostedEmailSettings(),
       ]);
+      const customerProfile = Array.isArray(customerProfileBatch?.profiles)
+        ? customerProfileBatch.profiles[0]
+        : null;
+      const isTeamPosted = isPhoneExcluded(customerProfile?.phone, emailSettings.excludedPhones);
 
       // Merge only the fields each enrichment adds, keeping normalizedTask as the base
       // so that assignment fields (assigneeId, assigneeName, etc.) are never overwritten
       // by a stale enrichment result.
       const enrichedTask = {
         ...normalizedTask,
+        postedBy: isTeamPosted ? 'team' : 'customer',
+        isTeamPosted,
         // from enrichTasksWithTaskCallStatus
         taskCallStatus: withCallStatus[0]?.taskCallStatus,
         taskCallFollowUpDate: withCallStatus[0]?.taskCallFollowUpDate,
