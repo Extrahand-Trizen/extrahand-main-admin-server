@@ -1330,6 +1330,37 @@ export class TaskManagementController {
     }
   }
 
+  static async notifyBookNowDispatchStage(req: Request, res: Response): Promise<void> {
+    try {
+      const { taskId } = req.params;
+      const { stage } = req.body || {};
+      if (stage !== 'area_rule' && stage !== 'all') {
+        res.status(400).json({ success: false, error: 'Stage must be area_rule or all' });
+        return;
+      }
+
+      const result = await taskServiceClient.notifyBookNowDispatchStage(taskId, stage);
+      taskServiceClient.invalidateTaskCache(taskId);
+      TaskManagementController.invalidateCache();
+
+      await createAuditLog(
+        req,
+        `${Resource.TASK}.notify_dispatch_stage`,
+        Resource.TASK,
+        taskId,
+        { stage, notifiedCount: result?.data?.notifiedCount ?? result?.notifiedCount ?? 0 },
+      );
+
+      res.json({ success: true, data: result.data || result });
+    } catch (error: any) {
+      logger.error('Notify Book Now dispatch stage error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to notify eligible partners',
+      });
+    }
+  }
+
   /**
    * POST /api/v1/tasks/:taskId/delete-requests
    * Operations creates a delete request for Super Admin approval.

@@ -113,6 +113,12 @@ router.post(
   TaskManagementController.assignHelper
 );
 
+router.post(
+  '/:taskId/dispatch/notify-stage',
+  requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
+  TaskManagementController.notifyBookNowDispatchStage
+);
+
 router.get(
   '/:taskId/applications',
   requirePermission(`${Resource.TASK_APPLICATION}.${Action.LIST}`),

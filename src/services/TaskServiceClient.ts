@@ -157,6 +157,17 @@ export class TaskServiceClient {
     const response = await this.client.patch(`/api/v1/tasks/${taskId}/status`, { status });
     return response.data;
   }
+
+  async notifyBookNowDispatchStage(
+    taskId: string,
+    stage: 'area_rule' | 'all',
+  ): Promise<any> {
+    const response = await this.client.post(
+      `/api/v1/tasks/${taskId}/dispatch/notify-stage`,
+      { stage },
+    );
+    return response.data;
+  }
   
   /**
    * Delete task (admin call — task-service detects X-Service-Name: main-admin-service and bypasses requester check)
