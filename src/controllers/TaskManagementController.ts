@@ -514,7 +514,12 @@ export class TaskManagementController {
         const callRecord = callMap.get(taskId);
         const order = t.bookingOrderId ? orderMap.get(String(t.bookingOrderId)) : null;
 
-        const customerPhone = customerProfile?.phone || '';
+        const customerPhone =
+          customerProfile?.phone ||
+          t.customerPhone ||
+          t.requesterPhone ||
+          t.customer?.phone ||
+          '';
         const isTeamPosted = isPhoneExcluded(customerPhone, excludedPhones);
 
         const isHourly = isHourlyTask(t);
@@ -916,7 +921,16 @@ export class TaskManagementController {
       const customerProfile = Array.isArray(customerProfileBatch?.profiles)
         ? customerProfileBatch.profiles[0]
         : null;
-      const isTeamPosted = isPhoneExcluded(customerProfile?.phone, emailSettings.excludedPhones);
+      const posterPhone =
+        customerProfile?.phone ||
+        normalizedTask.customerPhone ||
+        normalizedTask.requesterPhone ||
+        normalizedTask.customer?.phone ||
+        '';
+      const isTeamPosted =
+        normalizedTask.isTeamPosted === true ||
+        normalizedTask.postedBy === 'team' ||
+        isPhoneExcluded(posterPhone, emailSettings.excludedPhones);
 
       // Merge only the fields each enrichment adds, keeping normalizedTask as the base
       // so that assignment fields (assigneeId, assigneeName, etc.) are never overwritten
