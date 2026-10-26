@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { userServiceClient } from '../services/UserServiceClient';
 import { taskServiceClient } from '../services/TaskServiceClient';
+import { TaskManagementController } from './TaskManagementController';
 import logger from '../config/logger';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import {
@@ -147,7 +148,8 @@ export class AnalyticsController {
         userServiceClient.getHelperAadhaarVerifiedCount(),
         userServiceClient.getHelperCategoryCounts(),
         taskServiceClient.listTasks({ page: 1, limit: 1 }),
-        taskServiceClient.listTasks({ page: 1, limit: 1, status: 'open' }),
+        TaskManagementController.countCurrentlyOpenTasks(),
+        TaskManagementController.countCurrentlyOverdueTasks(),
         taskServiceClient.listTasks({
           page: 1,
           limit: 1,
@@ -183,9 +185,10 @@ export class AnalyticsController {
       const helperCategorySummary =
         results[2].status === 'fulfilled' ? results[2].value?.data?.summary || {} : {};
       const totalTaskResult = results[3].status === 'fulfilled' ? results[3].value : {};
-      const openTaskResult = results[4].status === 'fulfilled' ? results[4].value : {};
-      const inProgressTaskResult = results[5].status === 'fulfilled' ? results[5].value : {};
-      const completedTaskResult = results[6].status === 'fulfilled' ? results[6].value : {};
+      const openTaskCount = results[4].status === 'fulfilled' ? results[4].value : 0;
+      const overdueTaskCount = results[5].status === 'fulfilled' ? results[5].value : 0;
+      const inProgressTaskResult = results[6].status === 'fulfilled' ? results[6].value : {};
+      const completedTaskResult = results[7].status === 'fulfilled' ? results[7].value : {};
 
       const taskServiceHealthy = results.slice(3).every((result) => result.status === 'fulfilled');
 
@@ -208,7 +211,8 @@ export class AnalyticsController {
         },
         tasks: {
           total: extractTotal(totalTaskResult),
-          open: extractTotal(openTaskResult),
+          open: openTaskCount,
+          overdue: overdueTaskCount,
           inProgress: extractTotal(inProgressTaskResult),
           completed: extractTotal(completedTaskResult),
         },

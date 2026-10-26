@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { NotificationController } from '../controllers/NotificationController';
 import { AppNotificationController } from '../controllers/AppNotificationController';
-import { verifyAuth, requireSuperAdmin } from '../middleware/auth';
+import { verifyAuth, requireOperationsAdminOrSuperAdmin } from '../middleware/auth';
 import { serviceAuthMiddleware } from '../middleware/serviceAuth';
 
 const router = Router();
@@ -19,18 +19,18 @@ const broadcastImageUpload = multer({
   },
 });
 
-// App user broadcasts (Operations Portal > Notifications) — Super Admin only
-router.get('/broadcasts', verifyAuth, requireSuperAdmin, AppNotificationController.listBroadcasts);
-router.post('/broadcasts', verifyAuth, requireSuperAdmin, AppNotificationController.sendBroadcast);
-router.post('/broadcasts/clear', verifyAuth, requireSuperAdmin, AppNotificationController.clearBroadcasts);
+// App user broadcasts (Operations Portal > Notifications) — Operations Admin and Super Admin
+router.get('/broadcasts', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.listBroadcasts);
+router.post('/broadcasts', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.sendBroadcast);
+router.post('/broadcasts/clear', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.clearBroadcasts);
 router.post(
   '/broadcasts/image',
   verifyAuth,
-  requireSuperAdmin,
+  requireOperationsAdminOrSuperAdmin,
   broadcastImageUpload.single('image'),
   AppNotificationController.uploadImage
 );
-router.post('/broadcasts/:campaignId/cancel', verifyAuth, requireSuperAdmin, AppNotificationController.cancelBroadcast);
+router.post('/broadcasts/:campaignId/cancel', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.cancelBroadcast);
 
 router.get('/', verifyAuth, NotificationController.listNotifications);
 router.post('/read-all', verifyAuth, NotificationController.markAllRead);

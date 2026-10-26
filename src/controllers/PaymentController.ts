@@ -202,6 +202,26 @@ export class PaymentController {
     }
   }
 
+  static async deleteTransaction(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        throw new Error('Transaction id is required');
+      }
+
+      const payload = await paymentServiceClient.delete(
+        `/api/v1/dashboard/transactions/${encodeURIComponent(id)}`
+      );
+      res.json({ success: true, data: payload });
+    } catch (error: any) {
+      logger.error('Delete transaction error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to delete transaction',
+      });
+    }
+  }
+
   static async updatePayoutStatus(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
     const { status } = req.body || {};

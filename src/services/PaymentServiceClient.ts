@@ -62,6 +62,11 @@ export class PaymentServiceClient {
     return response.data;
   }
 
+  async delete(path: string): Promise<any> {
+    const response = await this.client.delete(path);
+    return response.data;
+  }
+
   async listManualOpsPayoutQueue(params?: {
     status?: string;
     limit?: number;

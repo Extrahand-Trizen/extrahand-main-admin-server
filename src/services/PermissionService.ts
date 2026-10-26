@@ -14,7 +14,8 @@ export class PermissionService {
       if (role === 'super_admin') {
         return SUPER_ADMIN_PERMISSIONS;
       }
-      return MAIN_ADMIN_PERMISSIONS[role] || [];
+      const normalizedRole = role === 'operation_admin' ? 'operations_admin' : role;
+      return MAIN_ADMIN_PERMISSIONS[normalizedRole] || [];
     }
     
     // For other dashboards, return empty array (they'll define their own permissions)

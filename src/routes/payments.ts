@@ -25,6 +25,12 @@ router.patch(
   PaymentController.markTransactionTeamTest
 );
 
+router.delete(
+  '/transactions/:id',
+  requirePermission(`${Resource.PAYMENT}.${Action.DELETE}`),
+  PaymentController.deleteTransaction
+);
+
 router.get(
   '/payouts',
   requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
