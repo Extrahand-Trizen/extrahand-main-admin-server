@@ -26,7 +26,11 @@ import { TaskAssignment } from '../models/TaskAssignment';
 import { BookingOrder } from '../models/BookingOrder';
 import { userServiceClient } from '../services/UserServiceClient';
 import { sendTaskPostedEmail } from '../services/TaskPostedEmailService';
-import { getTaskPostedEmailSettings, isPhoneExcluded } from '../services/TaskPostedEmailSettingsService';
+import {
+  getTaskPostedEmailSettings,
+  isPhoneInExclusionList,
+  isPhoneExcluded,
+} from '../services/TaskPostedEmailSettingsService';
 import { TaskPostedEmailAttempt } from '../models/TaskPostedEmailAttempt';
 import { Task } from '../models/Task';
 import { Profile } from '../models/Profile';
@@ -520,7 +524,7 @@ export class TaskManagementController {
           t.requesterPhone ||
           t.customer?.phone ||
           '';
-        const isTeamPosted = isPhoneExcluded(customerPhone, excludedPhones);
+        const isTeamPosted = isPhoneInExclusionList(customerPhone, excludedPhones);
 
         const isHourly = isHourlyTask(t);
         let paymentAmount = typeof t.budget === 'number' ? t.budget : Number(t.budget?.amount ?? t.budgetValue ?? 0);
@@ -934,7 +938,7 @@ export class TaskManagementController {
       const isTeamPosted =
         normalizedTask.isTeamPosted === true ||
         normalizedTask.postedBy === 'team' ||
-        isPhoneExcluded(posterPhone, emailSettings.excludedPhones);
+        isPhoneInExclusionList(posterPhone, emailSettings.excludedPhones);
 
       // Merge only the fields each enrichment adds, keeping normalizedTask as the base
       // so that assignment fields (assigneeId, assigneeName, etc.) are never overwritten

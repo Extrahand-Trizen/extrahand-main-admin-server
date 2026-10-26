@@ -41,14 +41,18 @@ export async function updateTaskPostedEmailSettings(
   };
 }
 
-export function isPhoneExcluded(phone: string | undefined, excludedPhones: string[]): boolean {
+export function isPhoneInExclusionList(phone: string | undefined, excludedPhones: string[]): boolean {
   const normalized = normalizePhone(phone || '');
   if (!normalized) return false;
   const lastTen = normalized.slice(-10);
-  if (/^(\d)\1{9}$/.test(lastTen)) return true;
-
   return excludedPhones.some((excluded) => {
     const normalizedExcluded = normalizePhone(excluded);
     return normalizedExcluded === normalized || normalizedExcluded.slice(-10) === lastTen;
   });
+}
+
+export function isPhoneExcluded(phone: string | undefined, excludedPhones: string[]): boolean {
+  const normalized = normalizePhone(phone || '');
+  if (!normalized) return false;
+  return /^(\d)\1{9}$/.test(normalized.slice(-10)) || isPhoneInExclusionList(phone, excludedPhones);
 }
