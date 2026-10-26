@@ -45,6 +45,8 @@ export function isPhoneExcluded(phone: string | undefined, excludedPhones: strin
   const normalized = normalizePhone(phone || '');
   if (!normalized) return false;
   const lastTen = normalized.slice(-10);
+  if (/^(\d)\1{9}$/.test(lastTen)) return true;
+
   return excludedPhones.some((excluded) => {
     const normalizedExcluded = normalizePhone(excluded);
     return normalizedExcluded === normalized || normalizedExcluded.slice(-10) === lastTen;

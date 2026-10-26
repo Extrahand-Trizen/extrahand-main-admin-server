@@ -564,7 +564,11 @@ export class TaskManagementController {
           assigneeName: resolvedAssigneeName,
           assignedHelperName: resolvedAssigneeName,
           assignedTo: assignment
-            ? { userId: assignment.userId, name: assignment.name, email: assignment.email }
+            ? {
+                userId: assignment.assignedToUserId,
+                name: assignment.assignedToName,
+                email: assignment.assignedToEmail,
+              }
             : null,
           taskCallStatus: callRecord?.status || 'not_updated',
           taskCallFollowUpDate: callRecord?.followUpDate || null,
