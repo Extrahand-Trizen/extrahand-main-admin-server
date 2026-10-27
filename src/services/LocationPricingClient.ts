@@ -42,6 +42,10 @@ export class LocationPricingClient {
     return (await this.client.get('/api/v1/catalog/internal/location-pricing/categories')).data;
   }
 
+  async updateCategoryMinOrderValue(id: string, minOrderValue: number) {
+    return (await this.client.patch('/api/v1/catalog/internal/location-pricing/categories/' + encodeURIComponent(id) + '/min-order-value', { minOrderValue })).data;
+  }
+
   async listPricingSkus(categoryId?: string, sectionId?: string) {
     return (await this.client.get('/api/v1/catalog/internal/location-pricing/skus', { params: { categoryId, sectionId } })).data;
   }

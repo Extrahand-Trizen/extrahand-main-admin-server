@@ -18,6 +18,7 @@ import qcommerceRoutes from './qcommerce';
 import assignmentManagementRoutes from './assignmentManagement';
 import locationPricingRoutes from './locationPricing';
 import locationRoutes from './locations';
+import bannerRoutes from './banners';
 
 const router = Router();
 
@@ -44,6 +45,7 @@ router.use(`${API_PREFIX}/qcommerce`, qcommerceRoutes);
 router.use(`${API_PREFIX}/assignment-management`, assignmentManagementRoutes);
 router.use(`${API_PREFIX}/location-pricing`, locationPricingRoutes);
 router.use(`${API_PREFIX}/locations`, locationRoutes);
+router.use(`${API_PREFIX}/banners`, bannerRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

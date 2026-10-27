@@ -18,6 +18,7 @@ router.post('/locations/:type/:id/activate', auditMiddleware('location.activated
 router.post('/locations/:type/:id/deactivate', auditMiddleware('location.deactivated', 'location'), LocationPricingController.setLocationActive);
 router.get('/hourly-skus', LocationPricingController.listHourlySkus);
 router.get('/categories', LocationPricingController.listPricingCategories);
+router.patch('/categories/:id/min-order-value', auditMiddleware('category.min_order_value.updated', 'category', (req) => req.params.id), LocationPricingController.updateCategoryMinOrderValue);
 router.get('/skus', LocationPricingController.listPricingSkus);
 router.patch(
   '/skus/:id/global-price',

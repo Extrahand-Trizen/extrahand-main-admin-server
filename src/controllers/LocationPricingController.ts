@@ -57,6 +57,11 @@ export class LocationPricingController {
     return forward(() => locationPricingClient.listPricingCategories(), res, 'List pricing categories');
   }
 
+  static updateCategoryMinOrderValue(req: Request, res: Response) {
+    const minOrderValue = Number(req.body?.minOrderValue);
+    return forward(() => locationPricingClient.updateCategoryMinOrderValue(String(req.params.id), minOrderValue), res, 'Update category minimum order value');
+  }
+
   static listPricingSkus(req: Request, res: Response) {
     return forward(
       () => locationPricingClient.listPricingSkus(
