@@ -7,6 +7,14 @@ const router = Router();
 
 router.get('/active', LocationController.getActive);
 router.use(verifyAuth);
+router.use((req, res, next) => {
+  const operationsAdminRoles = ['operations_admin', 'operation_admin', 'operations'];
+  if (req.admin && operationsAdminRoles.includes(req.admin.role)) {
+    res.status(403).json({ success: false, error: 'Location management access is not available to operations admins' });
+    return;
+  }
+  next();
+});
 router.get('/', requirePermission(`${Resource.USER}.${Action.LIST}`), LocationController.getAll);
 router.use(requirePermission(`${Resource.USER}.${Action.UPDATE}`));
 router.post('/cities', LocationController.createCity);

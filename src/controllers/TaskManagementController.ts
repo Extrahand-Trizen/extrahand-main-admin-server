@@ -640,6 +640,30 @@ export class TaskManagementController {
     return buildTasksPromise;
   }
 
+  static async countCurrentlyOpenTasks(): Promise<number> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const now = new Date();
+
+    return tasks.filter((task) => {
+      if (task.status !== 'open') return false;
+      if (!task.scheduledDate || task.dateOption === 'flexible') return true;
+      return new Date(task.scheduledDate) >= now;
+    }).length;
+  }
+
+  static async countCurrentlyOverdueTasks(): Promise<number> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const now = new Date();
+
+    return tasks.filter((task) => {
+      if (task.status !== 'open' || !task.scheduledDate || task.dateOption === 'flexible') {
+        return false;
+      }
+      const scheduledDate = new Date(task.scheduledDate);
+      return !Number.isNaN(scheduledDate.getTime()) && scheduledDate < now;
+    }).length;
+  }
+
   /**
    * GET /api/v1/tasks
    * List tasks
@@ -1788,11 +1812,57 @@ export class TaskManagementController {
 
       const result = await taskServiceClient.listDeletedTasks({ page, limit, search });
       const tasks = Array.isArray(result?.data) ? result.data.map(normalizeTask) : [];
+      const requesterIds: string[] = Array.from(
+        new Set<string>(
+          tasks
+            .map((task: any) =>
+              normalizeTaskIdForAssignment(
+                task.CustomerId || task.customerId || task.requesterId,
+              ),
+            )
+            .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      );
+      const requesterObjectIds = requesterIds
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      const profiles =
+        requesterIds.length > 0
+          ? await Profile.find({
+              $or: [
+                { uid: { $in: requesterIds } },
+                ...(requesterObjectIds.length > 0
+                  ? [{ _id: { $in: requesterObjectIds } }]
+                  : []),
+              ],
+            })
+              .select('uid name')
+              .lean()
+          : [];
+      const profileMap = new Map<string, string>();
+      for (const profile of profiles) {
+        if (profile.uid) profileMap.set(String(profile.uid), profile.name);
+        profileMap.set(String(profile._id), profile.name);
+      }
+      const enrichedTasks = tasks.map((task: any) => {
+        const requesterId = normalizeTaskIdForAssignment(
+          task.CustomerId || task.customerId || task.requesterId,
+        );
+        return {
+          ...task,
+          customerName:
+            (requesterId ? profileMap.get(requesterId) : undefined) ||
+            task.customerName ||
+            task.userName ||
+            task.requesterName ||
+            '',
+        };
+      });
       const pagination = extractPagination(result);
 
       res.json({
         success: true,
-        data: tasks,
+        data: enrichedTasks,
         ...(pagination ? { pagination } : {}),
       });
     } catch (error: any) {

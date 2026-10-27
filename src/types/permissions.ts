@@ -156,6 +156,10 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     // Analytics
     `${Resource.ANALYTICS}.${Action.VIEW}`,
 
+    // Task financial breakdown
+    `${Resource.PAYMENT}.${Action.VIEW}`,
+    `${Resource.PAYMENT}.${Action.LIST}`,
+
     // Qcommerce
     `${Resource.QCOMMERCE}.${Action.VIEW}`,
     `${Resource.QCOMMERCE}.${Action.LIST}`,
@@ -191,6 +195,9 @@ export const MAIN_ADMIN_PERMISSIONS: Record<string, Permission[]> = {
     `${Resource.PAYOUT}.${Action.LIST}`,
     `${Resource.PAYOUT}.${Action.VIEW}`,
     `${Resource.PAYOUT}.${Action.UPDATE}`,
+    // Task financial breakdown
+    `${Resource.PAYMENT}.${Action.VIEW}`,
+    `${Resource.PAYMENT}.${Action.LIST}`,
 
     // Qcommerce
     `${Resource.QCOMMERCE}.${Action.VIEW}`,

@@ -153,3 +153,22 @@ export const requireSuperAdmin = (
   
   next();
 };
+
+export const requireOperationsAdminOrSuperAdmin = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  if (!req.admin) {
+    res.status(401).json({ success: false, error: 'Authentication required' });
+    return;
+  }
+
+  const operationsAdminRoles = ['operations_admin', 'operation_admin', 'operations'];
+  if (!req.admin.isSuperAdmin && !operationsAdminRoles.includes(req.admin.role)) {
+    res.status(403).json({ success: false, error: 'Operations admin access required' });
+    return;
+  }
+
+  next();
+};
