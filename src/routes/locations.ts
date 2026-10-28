@@ -7,6 +7,7 @@ const router = Router();
 
 router.get('/active', LocationController.getActive);
 router.use(verifyAuth);
+router.get('/', requirePermission(`${Resource.USER}.${Action.LIST}`), LocationController.getAll);
 router.use((req, res, next) => {
   const operationsAdminRoles = ['operations_admin', 'operation_admin', 'operations'];
   if (req.admin && operationsAdminRoles.includes(req.admin.role)) {
@@ -15,7 +16,6 @@ router.use((req, res, next) => {
   }
   next();
 });
-router.get('/', requirePermission(`${Resource.USER}.${Action.LIST}`), LocationController.getAll);
 router.use(requirePermission(`${Resource.USER}.${Action.UPDATE}`));
 router.post('/cities', LocationController.createCity);
 router.patch('/cities/:cityId', LocationController.updateCity);

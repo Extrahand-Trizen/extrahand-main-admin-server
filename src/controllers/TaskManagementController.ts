@@ -672,6 +672,9 @@ export class TaskManagementController {
     try {
       const customerFilter =
         (req.query.customerId as string) || (req.query.CustomerId as string);
+      const customerFilters = customerFilter
+        ? customerFilter.split(',').map((id) => id.trim()).filter(Boolean)
+        : [];
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
       const postedByParam = String(req.query.postedBy || '').trim().toLowerCase();
@@ -683,6 +686,8 @@ export class TaskManagementController {
       const category = String(req.query.category || '').trim();
       const scheduledDateFrom = req.query.scheduledDateFrom as string;
       const scheduledDateTo = req.query.scheduledDateTo as string;
+      const createdFrom = req.query.createdFrom as string;
+      const createdTo = req.query.createdTo as string;
       const sortBy = String(req.query.sortBy || 'scheduledDate');
       const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
       const page = Math.max(1, Number(req.query.page) || 1);
@@ -768,12 +773,12 @@ export class TaskManagementController {
       }
 
       // 5. Customer ID
-      if (customerFilter) {
+      if (customerFilters.length > 0) {
         filtered = filtered.filter(
           (t) =>
-            String(t.CustomerId || '') === customerFilter ||
-            String(t.customerId || '') === customerFilter ||
-            String(t.requesterId || '') === customerFilter,
+            customerFilters.includes(String(t.CustomerId || '')) ||
+            customerFilters.includes(String(t.customerId || '')) ||
+            customerFilters.includes(String(t.requesterId || '')),
         );
       }
 
@@ -837,7 +842,31 @@ export class TaskManagementController {
         });
       }
 
-      // 12. Sorting
+      // 12. Work creation date range
+      if (createdFrom || createdTo) {
+        const fromDate = createdFrom ? new Date(createdFrom) : null;
+        const toDate = createdTo ? new Date(createdTo) : null;
+        if (
+          (fromDate && Number.isNaN(fromDate.getTime())) ||
+          (toDate && Number.isNaN(toDate.getTime()))
+        ) {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid work creation date range',
+          });
+          return;
+        }
+
+        filtered = filtered.filter((task) => {
+          const createdAt = task.createdAt ? new Date(task.createdAt) : null;
+          if (!createdAt || Number.isNaN(createdAt.getTime())) return false;
+          if (fromDate && createdAt < fromDate) return false;
+          if (toDate && createdAt > toDate) return false;
+          return true;
+        });
+      }
+
+      // 13. Sorting
       const isAsc = sortOrder === 'asc';
       filtered = [...filtered].sort((a, b) => {
         if (sortBy === 'scheduledDate') {
@@ -865,7 +894,7 @@ export class TaskManagementController {
         return isAsc ? crA - crB : crB - crA;
       });
 
-      // 13. Pagination
+      // 14. Pagination
       const total = filtered.length;
       const pages = Math.max(1, Math.ceil(total / limit));
       const start = (page - 1) * limit;

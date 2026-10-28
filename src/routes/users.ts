@@ -3,6 +3,7 @@ import { UserManagementController } from '../controllers/UserManagementControlle
 import { verifyAuth, requirePermission } from '../middleware/auth';
 import { Resource, Action } from '../types/permissions';
 import { PartnerCategoryRequestController } from '../controllers/PartnerCategoryRequestController';
+import { CustomerActivityController } from '../controllers/CustomerActivityController';
 
 const router = Router();
 
@@ -18,6 +19,12 @@ router.patch(
   '/partner-category-requests/:requestId',
   requirePermission(`${Resource.USER}.${Action.UPDATE}`),
   PartnerCategoryRequestController.review
+);
+
+router.get(
+  '/customer-activity',
+  requirePermission(`${Resource.USER}.${Action.LIST}`),
+  CustomerActivityController.list
 );
 
 // User management routes
