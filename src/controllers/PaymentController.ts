@@ -49,14 +49,9 @@ export class PaymentController {
         data: {
           metrics: {
             totalPayins: o.gmv ?? null,
-            totalRefunds: o.totalRefunds ?? null,
             totalPayouts: o.totalPayouts ?? null,
-            capturedCount: typeof o.totalPayins === 'number' ? o.totalPayins : 0,
-            failedCount: 0,
-            successRate:
-              typeof o.paymentSuccessRate === 'number'
-                ? o.paymentSuccessRate / 100
-                : 0,
+            revenue: o.revenue ?? null,
+            totalTax: o.totalTax ?? null,
           },
           alerts: [
             {
