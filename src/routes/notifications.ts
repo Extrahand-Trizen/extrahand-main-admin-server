@@ -2,7 +2,9 @@ import { Router } from 'express';
 import multer from 'multer';
 import { NotificationController } from '../controllers/NotificationController';
 import { AppNotificationController } from '../controllers/AppNotificationController';
-import { verifyAuth, requireOperationsAdminOrSuperAdmin } from '../middleware/auth';
+import { WhatsAppNotificationController } from '../controllers/WhatsAppNotificationController';
+import { verifyAuth, requireOperationsAdminOrSuperAdmin, requirePermission } from '../middleware/auth';
+import { Action, Resource } from '../types/permissions';
 import { serviceAuthMiddleware } from '../middleware/serviceAuth';
 
 const router = Router();
@@ -38,5 +40,28 @@ router.post('/:notificationId/read', verifyAuth, NotificationController.markRead
 
 // Service-auth webhook
 router.post('/events', serviceAuthMiddleware, NotificationController.receiveEvent);
+router.post(
+  '/work-whatsapp-dispatch',
+  serviceAuthMiddleware,
+  WhatsAppNotificationController.dispatchWork,
+);
+router.post(
+  '/work-whatsapp-dispatch/send',
+  verifyAuth,
+  requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
+  WhatsAppNotificationController.dispatchWork,
+);
+router.get(
+  '/work-whatsapp-dispatch/status',
+  verifyAuth,
+  requirePermission(`${Resource.TASK}.${Action.VIEW}`),
+  WhatsAppNotificationController.getDispatchStatuses,
+);
+router.post(
+  '/work-whatsapp-dispatch/resend',
+  verifyAuth,
+  requirePermission(`${Resource.TASK}.${Action.UPDATE}`),
+  WhatsAppNotificationController.resendWork,
+);
 
 export default router;

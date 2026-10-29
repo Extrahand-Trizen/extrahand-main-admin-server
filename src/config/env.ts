@@ -44,6 +44,15 @@ const envSchema = z.object({
   QCOMMERCE_SERVICE_URL: z.string().url().default('http://localhost:4010'),
   SUPPORT_SERVICE_URL: z.string().url().optional(),
   NOTIFICATION_SERVICE_URL: z.string().url().optional(),
+  DIALOG_SERVICE_URL: z.string().url().optional(),
+  DIALOG_ORGANIZATION_ID: z.string().optional(),
+  DIALOG_API_KEY: z.string().min(1).optional(),
+  DIALOG_TEMPLATE_NAME: z.string().default('extrahand_nearby_work_skill_match'),
+  DIALOG_TEMPLATE_LANGUAGE: z.string().min(2).max(10).default('en'),
+  DIALOG_PHONE_NUMBER_ID: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().uuid().optional(),
+  ),
   SERVICE_AUTH_TOKEN: z.string().min(32),
   GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
   

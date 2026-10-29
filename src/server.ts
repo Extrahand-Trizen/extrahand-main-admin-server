@@ -6,6 +6,7 @@ import { minioService } from './services/MinioService';
 import { AadhaarFollowUpController } from './controllers/AadhaarFollowUpController';
 import { KycReviewController } from './controllers/KycReviewController';
 import { TaskManagementController } from './controllers/TaskManagementController';
+import { retryFailedWorkWhatsAppDispatches } from './services/WhatsAppDispatchService';
 
 const PORT = env.PORT;
 
@@ -19,6 +20,12 @@ connectDatabase()
     AadhaarFollowUpController.warmCache();
     KycReviewController.warmCache();
     TaskManagementController.warmCache();
+    const whatsappRetryTimer = setInterval(() => {
+      void retryFailedWorkWhatsAppDispatches().catch((error) => {
+        logger.error('WhatsApp dispatch retry scan failed', { error });
+      });
+    }, 30_000);
+    whatsappRetryTimer.unref();
 
     // Start server
     const server = app.listen(PORT, () => {

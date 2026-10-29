@@ -4,6 +4,7 @@ import { InviteController } from '../controllers/InviteController';
 import { verifyAuth, requireSuperAdmin } from '../middleware/auth';
 import { TaskPostedEmailSettingsController } from '../controllers/TaskPostedEmailSettingsController';
 import { RoundRobinTeamSettingsController } from '../controllers/RoundRobinTeamSettingsController';
+import { WhatsAppNotificationController } from '../controllers/WhatsAppNotificationController';
 
 const router = Router();
 
@@ -22,6 +23,8 @@ router.post('/users/:userId/dashboard-access', requireSuperAdmin, AdminUserContr
 router.delete('/users/:userId/dashboard-access/:dashboardType', requireSuperAdmin, AdminUserController.removeDashboardAccess);
 router.get('/settings/task-posted-email', requireSuperAdmin, TaskPostedEmailSettingsController.get);
 router.put('/settings/task-posted-email', requireSuperAdmin, TaskPostedEmailSettingsController.update);
+router.get('/settings/whatsapp-notifications', requireSuperAdmin, WhatsAppNotificationController.getSettings);
+router.put('/settings/whatsapp-notifications', requireSuperAdmin, WhatsAppNotificationController.updateSettings);
 router.get('/settings/round-robin-team', requireSuperAdmin, RoundRobinTeamSettingsController.get);
 router.put('/settings/round-robin-team', requireSuperAdmin, RoundRobinTeamSettingsController.update);
 
