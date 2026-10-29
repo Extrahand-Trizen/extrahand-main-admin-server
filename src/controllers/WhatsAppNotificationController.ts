@@ -83,6 +83,12 @@ export class WhatsAppNotificationController {
         category: category.trim().slice(0, 200) || 'work',
         locationLabel: locationLabel.trim().slice(0, 300),
       });
+      logger.info('Work-dispatch WhatsApp request processed', {
+        taskId,
+        stage,
+        recipientCount: recipientUids.length,
+        result: data,
+      });
       res.json({ success: true, data });
     } catch (error) {
       logger.error('Work-dispatch WhatsApp processing failed', {
