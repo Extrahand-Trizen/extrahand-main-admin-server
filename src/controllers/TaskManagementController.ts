@@ -524,7 +524,10 @@ export class TaskManagementController {
           t.requesterPhone ||
           t.customer?.phone ||
           '';
-        const isTeamPosted = isPhoneInExclusionList(customerPhone, excludedPhones);
+        // A work without a resolvable customer profile cannot be shown as a
+        // customer work. Keep it available to operations under the team filter.
+        const isTeamPosted =
+          !customerProfile || isPhoneInExclusionList(customerPhone, excludedPhones);
 
         const isHourly = isHourlyTask(t);
         let paymentAmount = typeof t.budget === 'number' ? t.budget : Number(t.budget?.amount ?? t.budgetValue ?? 0);
