@@ -80,6 +80,7 @@ export class UserServiceClient {
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
     uids?: string;
+    excludePhones?: string;
     includeSummary?: boolean;
   }): Promise<any> {
     const response = await this.client.get('/api/v1/users', { params });

@@ -7,6 +7,7 @@ const router = Router();
 router.use(verifyAuth);
 
 router.get('/', requirePermission(`${Resource.TASK}.${Action.LIST}`), AssignmentManagementController.getRules);
+router.get('/eligible-partners', requirePermission(`${Resource.TASK}.${Action.LIST}`), AssignmentManagementController.getEligiblePartners);
 router.post('/preferred-partners', requirePermission(`${Resource.TASK}.${Action.UPDATE}`), AssignmentManagementController.addPreferredPartner);
 router.delete('/preferred-partners/:profileId', requirePermission(`${Resource.TASK}.${Action.UPDATE}`), AssignmentManagementController.removePreferredPartner);
 router.post('/preferred-partners/reorder', requirePermission(`${Resource.TASK}.${Action.UPDATE}`), AssignmentManagementController.reorderPreferredPartners);

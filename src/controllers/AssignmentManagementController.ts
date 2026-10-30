@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { AssignmentManagementRules } from '../models/AssignmentManagementRules';
+import { userServiceClient } from '../services/UserServiceClient';
+import { getTaskPostedEmailSettings } from '../services/TaskPostedEmailSettingsService';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import logger from '../config/logger';
 
@@ -44,6 +46,56 @@ export class AssignmentManagementController {
     } catch (error: any) {
       logger.error('Get assignment management rules error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to load assignment rules' });
+    }
+  }
+
+  static async getEligiblePartners(req: Request, res: Response): Promise<void> {
+    try {
+      const [rules, emailSettings] = await Promise.all([
+        getRulesDocument(),
+        getTaskPostedEmailSettings(),
+      ]);
+      const excludedPhones = Array.from(new Set([
+        ...(rules.excludedPhones || []),
+        ...emailSettings.excludedPhones,
+      ].map(normalizePhone).filter(Boolean)));
+      const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
+      const pageSize = 50;
+      const requestedPage = Number(req.query.page ?? 1);
+      if (!Number.isInteger(requestedPage) || requestedPage < 1 || requestedPage > 100) {
+        res.status(400).json({ success: false, error: 'page must be an integer between 1 and 100' });
+        return;
+      }
+
+      const result = await userServiceClient.listUsers({
+        role: 'partner',
+        status: 'approved',
+        search,
+        page: requestedPage,
+        limit: pageSize,
+        excludePhones: excludedPhones.join(','),
+      });
+
+      if (!result.success || !Array.isArray(result.data) || !result.pagination) {
+        throw new Error('User service returned an invalid partner list response');
+      }
+
+      res.json({
+        success: true,
+        data: result.data,
+        totalCount: result.pagination.total,
+        excludedPhones,
+        pagination: result.pagination,
+      });
+    } catch (error: any) {
+      logger.error('Get eligible assignment partners error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error ||
+          error.response?.data?.message ||
+          error.message ||
+          'Failed to load eligible partners',
+      });
     }
   }
 
