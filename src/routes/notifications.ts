@@ -22,6 +22,13 @@ const broadcastImageUpload = multer({
 });
 
 // App user broadcasts (Operations Portal > Notifications) — Operations Admin and Super Admin
+router.get('/whatsapp/categories', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.getPartnerCategories);
+router.get('/whatsapp/templates', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.getApprovedTemplates);
+router.post('/whatsapp/audience', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.getAudienceCount);
+router.post('/whatsapp/campaigns', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.sendCampaign);
+router.get('/whatsapp/campaigns', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.getCampaignHistory);
+router.get('/whatsapp/campaigns/:campaignId/recipients', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.getCampaignRecipients);
+
 router.get('/broadcasts', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.listBroadcasts);
 router.post('/broadcasts', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.sendBroadcast);
 router.post('/broadcasts/clear', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.clearBroadcasts);
