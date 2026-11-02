@@ -183,7 +183,13 @@ export class LocationPricingController {
         providerPlaceId: placeId,
         formattedAddress: details?.formatted_address || candidate.formattedAddress || candidate.address || '',
         area: pickAddressComponent(addressComponents, 'sublocality_level_1', 'sublocality', 'neighborhood', 'administrative_area_level_3'),
-        city: pickAddressComponent(addressComponents, 'locality', 'postal_town', 'administrative_area_level_3'),
+        city: pickAddressComponent(
+          addressComponents,
+          'locality',
+          'postal_town',
+          'administrative_area_level_3',
+          'administrative_area_level_2',
+        ),
         state: pickAddressComponent(addressComponents, 'administrative_area_level_1'),
         country: pickAddressComponent(addressComponents, 'country') || 'India',
         pincode: pickAddressComponent(addressComponents, 'postal_code'),
@@ -195,7 +201,13 @@ export class LocationPricingController {
       return res.json(canonical);
     } catch (error: any) {
       logger.error('ensureGoogleLocation failed', error);
-      return res.status(500).json({ success: false, error: error?.message || 'Failed to map the selected Google location' });
+      const upstreamError = error?.response?.data;
+      const message =
+        upstreamError?.error ||
+        upstreamError?.message ||
+        error?.message ||
+        'Failed to map the selected Google location';
+      return res.status(getClientSafeStatus(error)).json({ success: false, error: message });
     }
   }
 }
