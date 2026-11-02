@@ -92,6 +92,66 @@ function normalizeTask(task: any): any {
   };
 }
 
+function getTaskScheduledStart(task: any): Date | null {
+  if (!task?.scheduledDate || task.dateOption === 'flexible') return null;
+
+  const scheduledDate = new Date(task.scheduledDate);
+  if (Number.isNaN(scheduledDate.getTime())) return null;
+
+  const dateParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(scheduledDate);
+  const year = dateParts.find((part) => part.type === 'year')?.value;
+  const month = dateParts.find((part) => part.type === 'month')?.value;
+  const day = dateParts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) return null;
+
+  let hours = 0;
+  let minutes = 0;
+  const scheduledTimeStart = String(task.scheduledTimeStart || '').trim();
+  if (scheduledTimeStart) {
+    const match = scheduledTimeStart.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+    if (!match) return null;
+
+    hours = Number(match[1]);
+    minutes = Number(match[2]);
+    const period = match[3]?.toUpperCase();
+    if (minutes > 59 || (period ? hours < 1 || hours > 12 : hours > 23)) return null;
+    if (period === 'PM' && hours !== 12) hours += 12;
+    if (period === 'AM' && hours === 12) hours = 0;
+  }
+
+  const start = new Date(
+    `${year}-${month}-${day}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00+05:30`,
+  );
+  return Number.isNaN(start.getTime()) ? null : start;
+}
+
+function isTaskAssigned(task: any): boolean {
+  const assigneeValues = [
+    task?.assigneeId,
+    task?.assigneeUid,
+    task?.partnerId,
+    task?.partnerUid,
+    task?.assigneeName,
+    task?.assignedHelperName,
+    task?.assignedToName,
+  ];
+  return assigneeValues.some((value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized !== '' && normalized !== 'null';
+  });
+}
+
+function isTaskOverdue(task: any, now: Date): boolean {
+  if (task?.status !== 'open' || isTaskAssigned(task)) return false;
+  const scheduledStart = getTaskScheduledStart(task);
+  return scheduledStart !== null && scheduledStart <= now;
+}
+
 async function enrichTasksWithTaskCallStatus(tasks: any[]): Promise<any[]> {
   const taskIds = Array.from(
     new Set(
@@ -648,9 +708,7 @@ export class TaskManagementController {
     const now = new Date();
 
     return tasks.filter((task) => {
-      if (task.status !== 'open') return false;
-      if (!task.scheduledDate || task.dateOption === 'flexible') return true;
-      return new Date(task.scheduledDate) >= now;
+      return task.status === 'open' && !isTaskOverdue(task, now);
     }).length;
   }
 
@@ -658,13 +716,7 @@ export class TaskManagementController {
     const tasks = await TaskManagementController.getCompiledTasks();
     const now = new Date();
 
-    return tasks.filter((task) => {
-      if (task.status !== 'open' || !task.scheduledDate || task.dateOption === 'flexible') {
-        return false;
-      }
-      const scheduledDate = new Date(task.scheduledDate);
-      return !Number.isNaN(scheduledDate.getTime()) && scheduledDate < now;
-    }).length;
+    return tasks.filter((task) => isTaskOverdue(task, now)).length;
   }
 
   /**
@@ -748,19 +800,9 @@ export class TaskManagementController {
 
       // 3. Status & Overdue
       if (isOverdueFilter) {
-        filtered = filtered.filter((t) => {
-          if (t.status !== 'open') return false;
-          if (!t.scheduledDate) return false;
-          if (t.dateOption === 'flexible') return false;
-          return new Date(t.scheduledDate) < now;
-        });
+        filtered = filtered.filter((t) => isTaskOverdue(t, now));
       } else if (requestedStatus === 'open') {
-        filtered = filtered.filter((t) => {
-          if (t.status !== 'open') return false;
-          if (!t.scheduledDate) return true;
-          if (t.dateOption === 'flexible') return true;
-          return new Date(t.scheduledDate) >= now;
-        });
+        filtered = filtered.filter((t) => t.status === 'open' && !isTaskOverdue(t, now));
       } else if (requestedStatus && requestedStatus !== 'all') {
         filtered = filtered.filter((t) => t.status === requestedStatus);
       }
