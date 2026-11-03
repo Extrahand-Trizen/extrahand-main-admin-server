@@ -7,6 +7,7 @@ import { AadhaarFollowUpController } from './controllers/AadhaarFollowUpControll
 import { KycReviewController } from './controllers/KycReviewController';
 import { TaskManagementController } from './controllers/TaskManagementController';
 import { retryFailedWorkWhatsAppDispatches } from './services/WhatsAppDispatchService';
+import { resumePendingWhatsAppCampaigns } from './services/WhatsAppCampaignService';
 
 const PORT = env.PORT;
 
@@ -20,6 +21,15 @@ connectDatabase()
     AadhaarFollowUpController.warmCache();
     KycReviewController.warmCache();
     TaskManagementController.warmCache();
+    void resumePendingWhatsAppCampaigns(true).catch((error) => {
+      logger.error('WhatsApp campaign recovery scan failed', { error });
+    });
+    const whatsappCampaignRecoveryTimer = setInterval(() => {
+      void resumePendingWhatsAppCampaigns().catch((error) => {
+        logger.error('WhatsApp campaign retry scan failed', { error });
+      });
+    }, 30_000);
+    whatsappCampaignRecoveryTimer.unref();
     const whatsappRetryTimer = setInterval(() => {
       void retryFailedWorkWhatsAppDispatches().catch((error) => {
         logger.error('WhatsApp dispatch retry scan failed', { error });

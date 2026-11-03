@@ -36,6 +36,56 @@ const MAX_ATTEMPTS = 3;
 const STALE_SEND_MS = 5 * 60 * 1000;
 const RETRY_BATCH_SIZE = 50;
 
+export function normalizeWhatsAppRecipientPhone(profile: Record<string, unknown>): string | null {
+  const phoneDigits = String(
+    profile.phone ||
+      profile.mobile ||
+      profile.phoneNumber ||
+      profile.alternatePhone ||
+      '',
+  ).replace(/\D/g, '');
+  if (phoneDigits.length === 10) return `91${phoneDigits}`;
+  if (phoneDigits.length >= 11 && phoneDigits.length <= 15) return phoneDigits;
+  return null;
+}
+
+export async function sendDialogTemplateMessage(input: {
+  template: string;
+  language: string;
+  to: string;
+  variables: Record<string, string>;
+  idempotencyKey: string;
+}): Promise<string | undefined> {
+  if (!env.DIALOG_SERVICE_URL || !env.DIALOG_API_KEY) {
+    throw new Error('Dialog direct messaging configuration is incomplete');
+  }
+
+  const response = await axios.post(
+    `${env.DIALOG_SERVICE_URL.replace(/\/+$/, '')}/api/v1/messages`,
+    {
+      template: input.template,
+      language: input.language,
+      to: input.to,
+      variables: input.variables,
+      idempotencyKey: input.idempotencyKey,
+      ...(env.DIALOG_PHONE_NUMBER_ID
+        ? { phoneNumberId: env.DIALOG_PHONE_NUMBER_ID }
+        : {}),
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': env.DIALOG_API_KEY,
+      },
+      timeout: 12000,
+      validateStatus: (status) => status >= 200 && status < 300,
+    },
+  );
+  return typeof response.data?.data?.messageId === 'string'
+    ? response.data.data.messageId
+    : undefined;
+}
+
 export async function getWhatsAppNotificationSettings(): Promise<{
   enabled: boolean;
 }> {
@@ -234,19 +284,9 @@ async function submitClaimedDispatch(
       profileResponse.data?.profile ??
       profileResponse.data?.data?.profile ??
       profileResponse.data?.data;
-    const phoneDigits = String(
-      profile?.phone ||
-        profile?.mobile ||
-        profile?.phoneNumber ||
-        profile?.alternatePhone ||
-        '',
-    ).replace(/\D/g, '');
-    const recipientPhone =
-      phoneDigits.length === 10
-        ? `91${phoneDigits}`
-        : phoneDigits.length >= 11 && phoneDigits.length <= 15
-          ? phoneDigits
-          : '';
+    const recipientPhone = profile && typeof profile === 'object'
+      ? normalizeWhatsAppRecipientPhone(profile)
+      : null;
     if (!recipientPhone) {
       await WhatsAppDispatchRecord.updateOne(
         { _id: recordId },
@@ -263,45 +303,28 @@ async function submitClaimedDispatch(
       return 'disabled';
     }
 
-    const response = await axios.post(
-      `${env.DIALOG_SERVICE_URL.replace(/\/+$/, '')}/api/v1/messages`,
-      {
-        template: env.DIALOG_TEMPLATE_NAME,
-        language: env.DIALOG_TEMPLATE_LANGUAGE,
-        to: recipientPhone,
-        variables: {
-          '1': input.title,
-          '2': input.category,
-          '3': input.locationLabel,
-          buttonUrlSuffix: input.taskId,
-          taskId: input.taskId,
-          workId: input.taskId,
-          dispatchStage: input.stage,
-        },
-        idempotencyKey,
-        ...(env.DIALOG_PHONE_NUMBER_ID
-          ? { phoneNumberId: env.DIALOG_PHONE_NUMBER_ID }
-          : {}),
+    const providerEventId = await sendDialogTemplateMessage({
+      template: env.DIALOG_TEMPLATE_NAME,
+      language: env.DIALOG_TEMPLATE_LANGUAGE,
+      to: recipientPhone,
+      variables: {
+        '1': input.title,
+        '2': input.category,
+        '3': input.locationLabel,
+        buttonUrlSuffix: input.taskId,
+        taskId: input.taskId,
+        workId: input.taskId,
+        dispatchStage: input.stage,
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': env.DIALOG_API_KEY,
-        },
-        timeout: 12000,
-        validateStatus: (status) => status >= 200 && status < 300,
-      },
-    );
+      idempotencyKey,
+    });
 
     await WhatsAppDispatchRecord.updateOne(
       { _id: recordId },
       {
         $set: {
           status: 'queued',
-          providerEventId:
-            typeof response.data?.data?.messageId === 'string'
-              ? response.data.data.messageId
-              : undefined,
+          providerEventId,
         },
         $unset: { lastError: 1 },
       },

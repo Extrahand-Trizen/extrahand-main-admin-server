@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import logger from '../config/logger';
 import {
+  getAadhaarRoundRobinTeamDetails,
   getRoundRobinTeamDetails,
+  updateAadhaarRoundRobinEmails,
   updateRoundRobinEmails,
 } from '../services/RoundRobinTeamSettingsService';
 
@@ -43,6 +45,47 @@ export class RoundRobinTeamSettingsController {
       res.status(500).json({
         success: false,
         error: error.message || 'Failed to save round-robin team settings',
+      });
+    }
+  }
+
+  static async getAadhaar(req: Request, res: Response): Promise<void> {
+    try {
+      const data = await getAadhaarRoundRobinTeamDetails();
+      res.json({ success: true, data });
+    } catch (error: any) {
+      logger.error('Get Aadhaar round-robin team settings error', { error });
+      res.status(500).json({ success: false, error: 'Failed to load Aadhaar follow-up team settings' });
+    }
+  }
+
+  static async updateAadhaar(req: Request, res: Response): Promise<void> {
+    try {
+      const emails = Array.isArray(req.body?.emails) ? req.body.emails : [];
+      if (emails.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'At least one operations admin must be included in the Aadhaar follow-up order',
+        });
+        return;
+      }
+
+      if (emails.some((email: unknown) => typeof email !== 'string' || !email.includes('@'))) {
+        res.status(400).json({
+          success: false,
+          error: 'All members must have a valid email address',
+        });
+        return;
+      }
+
+      await updateAadhaarRoundRobinEmails(emails, req.admin?.userId);
+      const data = await getAadhaarRoundRobinTeamDetails();
+      res.json({ success: true, data });
+    } catch (error: any) {
+      logger.error('Update Aadhaar round-robin team settings error', { error });
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to save Aadhaar follow-up team settings',
       });
     }
   }

@@ -8,7 +8,29 @@ import logger from '../config/logger';
 import { createAuditLog } from '../middleware/audit';
 import bcrypt from 'bcrypt';
 import { TASK_POSTED_ROUND_ROBIN_EMAILS } from '../constants/taskAssignment';
-import { getRoundRobinEmails } from '../services/RoundRobinTeamSettingsService';
+import {
+  getAadhaarRoundRobinEmails,
+  getRoundRobinEmails,
+} from '../services/RoundRobinTeamSettingsService';
+
+const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
+
+async function findActiveOpsAdmins(userId: string, emails: string[]) {
+  return AdminUser.find({
+    status: 'active',
+    userId: { $ne: userId },
+    email: { $in: emails },
+    dashboardAccess: {
+      $elemMatch: {
+        dashboardType: DashboardType.MAIN_ADMIN,
+        status: 'active',
+        role: { $in: OPS_ROLES },
+      },
+    },
+  })
+    .select('userId name email')
+    .lean();
+}
 
 export class AdminUserController {
   /**
@@ -426,24 +448,17 @@ export class AdminUserController {
         AadhaarKycAssignment.countDocuments({ assignedToUserId: userId }),
       ]);
 
-      // Find remaining active operations admins (excluding this user) who can receive work
-      // Limited to round-robin email list (durgamshiva and tadembharath)
-      const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
-      const roundRobinEmails = await getRoundRobinEmails();
-      const allActiveOpsAdmins = await AdminUser.find({
-        status: 'active',
-        userId: { $ne: userId },
-        email: { $in: roundRobinEmails },
-        'dashboardAccess': {
-          $elemMatch: {
-            dashboardType: DashboardType.MAIN_ADMIN,
-            status: 'active',
-            role: { $in: OPS_ROLES },
-          },
-        },
-      })
-        .select('userId name email')
-        .lean();
+      const [workEmails, aadhaarEmails] = await Promise.all([
+        getRoundRobinEmails(),
+        getAadhaarRoundRobinEmails(),
+      ]);
+      const [workAdmins, aadhaarAdmins] = await Promise.all([
+        findActiveOpsAdmins(userId, workEmails),
+        findActiveOpsAdmins(userId, aadhaarEmails),
+      ]);
+      const allActiveOpsAdmins = Array.from(
+        new Map([...workAdmins, ...aadhaarAdmins].map((admin) => [admin.userId, admin])).values(),
+      );
 
       res.json({
         success: true,
@@ -457,7 +472,9 @@ export class AdminUserController {
             name: a.name,
             email: a.email,
           })),
-          canDelete: allActiveOpsAdmins.length > 0 || taskCount + aadhaarCount === 0,
+          canDelete:
+            (taskCount === 0 || workAdmins.length > 0) &&
+            (aadhaarCount === 0 || aadhaarAdmins.length > 0),
         },
       });
     } catch (error: any) {
@@ -468,8 +485,8 @@ export class AdminUserController {
 
   /**
    * POST /api/v1/admin/users/:userId/transfer-and-delete
-   * Transfers all task assignments and aadhaar follow-up assignments equally
-   * (round-robin) to remaining active operations admins, then deletes the admin user.
+   * Transfers task and Aadhaar assignments round-robin within their respective teams,
+   * then deletes the admin user.
    * Super Admin only.
    */
   static async transferAndDeleteAdminUser(req: Request, res: Response): Promise<void> {
@@ -488,24 +505,17 @@ export class AdminUserController {
         return;
       }
 
-      // Find remaining active operations admins (excluding this user)
-      // Limited to round-robin email list
-      const OPS_ROLES = ['operations_admin', 'operation_admin', 'operations'];
-      const roundRobinEmails = await getRoundRobinEmails();
-      const remainingAdmins = await AdminUser.find({
-        status: 'active',
-        userId: { $ne: userId },
-        email: { $in: roundRobinEmails },
-        'dashboardAccess': {
-          $elemMatch: {
-            dashboardType: DashboardType.MAIN_ADMIN,
-            status: 'active',
-            role: { $in: OPS_ROLES },
-          },
-        },
-      })
-        .select('userId name email')
-        .lean();
+      const [workEmails, aadhaarEmails] = await Promise.all([
+        getRoundRobinEmails(),
+        getAadhaarRoundRobinEmails(),
+      ]);
+      const [workAdmins, aadhaarAdmins] = await Promise.all([
+        findActiveOpsAdmins(userId, workEmails),
+        findActiveOpsAdmins(userId, aadhaarEmails),
+      ]);
+      const remainingAdmins = Array.from(
+        new Map([...workAdmins, ...aadhaarAdmins].map((admin) => [admin.userId, admin])).values(),
+      );
 
       // Fetch all task assignments and aadhaar assignments belonging to deleted user
       const [taskAssignments, aadhaarAssignments] = await Promise.all([
@@ -513,14 +523,20 @@ export class AdminUserController {
         AadhaarKycAssignment.find({ assignedToUserId: userId }).lean(),
       ]);
 
-      const totalAssignments = taskAssignments.length + aadhaarAssignments.length;
-
-      // If there are assignments but no remaining admins, block deletion
-      if (totalAssignments > 0 && remainingAdmins.length === 0) {
+      if (taskAssignments.length > 0 && workAdmins.length === 0) {
         res.status(400).json({
           success: false,
           error:
-            'Cannot delete this admin user — there are no other active operations admins to transfer their assigned work to. Please add another operations admin first.',
+            'Cannot delete this admin user — there are no other active Works team members to transfer their task assignments to. Please add another Works team member first.',
+        });
+        return;
+      }
+
+      if (aadhaarAssignments.length > 0 && aadhaarAdmins.length === 0) {
+        res.status(400).json({
+          success: false,
+          error:
+            'Cannot delete this admin user — there are no other active Aadhaar follow-up team members to transfer their assignments to. Please add another Aadhaar follow-up team member first.',
         });
         return;
       }
@@ -529,9 +545,9 @@ export class AdminUserController {
       let transferredAadhaar = 0;
 
       // Redistribute task assignments round-robin
-      if (taskAssignments.length > 0 && remainingAdmins.length > 0) {
+      if (taskAssignments.length > 0) {
         const taskBulkOps = taskAssignments.map((assignment, index) => {
-          const recipient = remainingAdmins[index % remainingAdmins.length];
+          const recipient = workAdmins[index % workAdmins.length];
           return {
             updateOne: {
               filter: { _id: assignment._id },
@@ -550,9 +566,9 @@ export class AdminUserController {
       }
 
       // Redistribute aadhaar KYC assignments round-robin
-      if (aadhaarAssignments.length > 0 && remainingAdmins.length > 0) {
+      if (aadhaarAssignments.length > 0) {
         const aadhaarBulkOps = aadhaarAssignments.map((assignment, index) => {
-          const recipient = remainingAdmins[index % remainingAdmins.length];
+          const recipient = aadhaarAdmins[index % aadhaarAdmins.length];
           return {
             updateOne: {
               filter: { _id: assignment._id },

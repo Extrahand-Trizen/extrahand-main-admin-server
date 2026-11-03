@@ -88,6 +88,26 @@ export class UserServiceClient {
     return response.data;
   }
 
+  async listWhatsAppAudience(params: {
+    app: 'customer_app' | 'helper_app' | 'seller_app';
+    categories: string[];
+    cities: string[];
+    workAreas: string[];
+    page: number;
+    limit: number;
+  }): Promise<{ success: boolean; data: string[]; pagination: { page: number; limit: number; total: number; pages: number } }> {
+    const response = await this.client.post('/api/v1/users/whatsapp-audience', params);
+    return response.data;
+  }
+
+  async listWhatsAppCategories(): Promise<{
+    success: boolean;
+    data: Array<{ id: string; name: string }>;
+  }> {
+    const response = await this.client.get('/api/v1/users/whatsapp-categories');
+    return response.data;
+  }
+
   async listPartnerCategoryRequests(params: {
     status?: string;
     page?: number;
