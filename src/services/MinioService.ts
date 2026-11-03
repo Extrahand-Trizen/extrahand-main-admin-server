@@ -106,6 +106,34 @@ class MinioService {
     return `${base}/${bucket}/${key}`;
   }
 
+  async deletePublicLauncherIcon(iconId: string, imageUrl: string): Promise<void> {
+    if (!this.initialized || !this.s3) {
+      throw new Error('MinioService: storage not configured — cannot delete launcher icon');
+    }
+
+    const bucket = env.MINIO_BUCKET_NAME || 'extrahand-images';
+    const endpoint = new URL(buildEndpointString(env.MINIO_SERVER_URL || env.MINIO_ENDPOINT || ''));
+    const url = new URL(imageUrl);
+    const expectedPathPrefix = `/${bucket}/app-branding/launcher-icons/`;
+    if (
+      url.origin !== endpoint.origin ||
+      !url.pathname.startsWith(expectedPathPrefix) ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error('MinioService: launcher icon URL is outside the public launcher-icon storage path');
+    }
+
+    const key = decodeURIComponent(url.pathname.slice(`/${bucket}/`.length));
+    const keyMatch = /^app-branding\/launcher-icons\/(eh-[a-f0-9-]+)\.(jpg|png|webp)$/i.exec(key);
+    if (!keyMatch || keyMatch[1] !== iconId) {
+      throw new Error('MinioService: invalid launcher icon object key');
+    }
+
+    await this.s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+    logger.info('MinioService: public launcher icon deleted', { key, bucket });
+  }
+
   /**
    * Returns a presigned GET URL for the given object key, or null if MinIO is
    * not configured or an error occurs.  Never throws — callers degrade gracefully.

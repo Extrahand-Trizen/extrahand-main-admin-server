@@ -41,6 +41,7 @@
     "USER_SERVICE_URL": "http://srv-captain--extrahand-user-service:4001",
     "ONBOARDING_SERVICE_URL": "http://srv-captain--extrahand-admin-service:4008",
     "TASK_SERVICE_URL": "http://srv-captain--extrahand-task-service:4002",
+    "PAYMENT_SERVICE_URL": "http://srv-captain--extrahand-payment-service:4009",
     "SUPPORT_SERVICE_URL": "http://srv-captain--extrahand-platform-support-service:5002",
     "SERVICE_AUTH_TOKEN": "YOUR_SERVICE_AUTH_TOKEN_HERE",
     "GOOGLE_MAPS_API_KEY": "AIzaSyBcW2kc0BCki836dicR35SOlzsZvw9sjqI",
