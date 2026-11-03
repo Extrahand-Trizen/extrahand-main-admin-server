@@ -27,6 +27,8 @@ router.get('/settings/whatsapp-notifications', requireSuperAdmin, WhatsAppNotifi
 router.put('/settings/whatsapp-notifications', requireSuperAdmin, WhatsAppNotificationController.updateSettings);
 router.get('/settings/round-robin-team', requireSuperAdmin, RoundRobinTeamSettingsController.get);
 router.put('/settings/round-robin-team', requireSuperAdmin, RoundRobinTeamSettingsController.update);
+router.get('/settings/aadhaar-round-robin-team', requireSuperAdmin, RoundRobinTeamSettingsController.getAadhaar);
+router.put('/settings/aadhaar-round-robin-team', requireSuperAdmin, RoundRobinTeamSettingsController.updateAadhaar);
 
 // Invite management (Super Admin only)
 router.post('/invites', requireSuperAdmin, InviteController.createInvite);

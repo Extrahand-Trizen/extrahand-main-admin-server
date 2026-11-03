@@ -8,6 +8,7 @@ import {
 } from '../constants/taskAssignment';
 
 const SETTINGS_KEY = 'support_team_round_robin';
+const AADHAAR_SETTINGS_KEY = 'aadhaar_followup_round_robin';
 const OPS_DASHBOARD_ROLES = ['operations_admin', 'operation_admin', 'operations'];
 
 export interface RoundRobinMemberDetail {
@@ -59,6 +60,41 @@ export async function updateRoundRobinEmails(
   emails: string[],
   updatedBy?: string,
 ): Promise<string[]> {
+  return updateEmailsForKey(SETTINGS_KEY, emails, updatedBy);
+}
+
+/**
+ * Get the ordered list of round-robin emails for Aadhaar follow-ups.
+ * Until a separate Aadhaar list is saved, preserve the current support team order.
+ */
+export async function getAadhaarRoundRobinEmails(): Promise<string[]> {
+  const existing = await RoundRobinTeamSettings.findOne({ key: AADHAAR_SETTINGS_KEY }).lean();
+  if (existing?.emails && existing.emails.length > 0) {
+    return existing.emails.map(normalizeAdminEmail).filter(Boolean);
+  }
+
+  const workEmails = await getRoundRobinEmails();
+  const doc = await RoundRobinTeamSettings.findOneAndUpdate(
+    { key: AADHAAR_SETTINGS_KEY },
+    { $setOnInsert: { emails: workEmails } },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  ).lean();
+  const aadhaarEmails = doc?.emails?.map(normalizeAdminEmail).filter(Boolean);
+  return aadhaarEmails?.length ? aadhaarEmails : workEmails;
+}
+
+export async function updateAadhaarRoundRobinEmails(
+  emails: string[],
+  updatedBy?: string,
+): Promise<string[]> {
+  return updateEmailsForKey(AADHAAR_SETTINGS_KEY, emails, updatedBy);
+}
+
+async function updateEmailsForKey(
+  key: string,
+  emails: string[],
+  updatedBy?: string,
+): Promise<string[]> {
   const normalized = Array.from(
     new Set(emails.map(normalizeAdminEmail).filter(Boolean)),
   );
@@ -68,7 +104,7 @@ export async function updateRoundRobinEmails(
   }
 
   const doc = await RoundRobinTeamSettings.findOneAndUpdate(
-    { key: SETTINGS_KEY },
+    { key },
     { $set: { emails: normalized, updatedBy } },
     { new: true, upsert: true, setDefaultsOnInsert: true },
   ).lean();
@@ -80,8 +116,16 @@ export async function updateRoundRobinEmails(
  * Get full team details for the settings UI (team members in order + available unassigned ops admins).
  */
 export async function getRoundRobinTeamDetails(): Promise<RoundRobinTeamSettingsData> {
-  const currentEmails = await getRoundRobinEmails();
+  return getTeamDetailsForEmails(await getRoundRobinEmails());
+}
 
+export async function getAadhaarRoundRobinTeamDetails(): Promise<RoundRobinTeamSettingsData> {
+  return getTeamDetailsForEmails(await getAadhaarRoundRobinEmails());
+}
+
+async function getTeamDetailsForEmails(
+  currentEmails: string[],
+): Promise<RoundRobinTeamSettingsData> {
   const allActiveAdmins = await AdminUser.find({
     status: 'active',
   })
