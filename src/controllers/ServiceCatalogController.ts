@@ -22,6 +22,66 @@ export class ServiceCatalogController {
     return forward(() => serviceCatalogClient.listServices(), res, 'List services');
   }
 
+  static async listCategoryContent(_req: Request, res: Response) {
+    return forward(
+      () => serviceCatalogClient.listCategoryContent(),
+      res,
+      'List service scope content',
+    );
+  }
+
+  static async updateCategoryContent(req: Request, res: Response) {
+    return forward(
+      () =>
+        serviceCatalogClient.upsertCategoryContent({
+          ...req.body,
+          categorySlug: String(req.params.slug),
+        }),
+      res,
+      'Update service scope content',
+    );
+  }
+
+  static async listSkuContent(_req: Request, res: Response) {
+    return forward(
+      () => serviceCatalogClient.listSkuContent(),
+      res,
+      'List service package content',
+    );
+  }
+
+  static async updateSkuScope(req: Request, res: Response) {
+    const { includes, excludes } = req.body || {};
+    if (
+      !Array.isArray(includes) ||
+      !includes.every((item: unknown) => typeof item === 'string') ||
+      !Array.isArray(excludes) ||
+      !excludes.every((item: unknown) => typeof item === 'string')
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'includes and excludes must be arrays of strings',
+      });
+    }
+    const displayName =
+      typeof req.body.displayName === 'string' ? req.body.displayName.trim() : '';
+    if (!displayName) {
+      return res.status(400).json({ success: false, error: 'displayName is required' });
+    }
+    return forward(
+      () =>
+        serviceCatalogClient.updateSkuScope(
+          String(req.params.categorySlug),
+          String(req.params.skuSlug),
+          displayName,
+          includes,
+          excludes,
+        ),
+      res,
+      'Update service package scope',
+    );
+  }
+
   static async listBookNowLocationAvailability(req: Request, res: Response) {
     return forward(
       () =>

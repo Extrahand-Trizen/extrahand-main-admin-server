@@ -49,6 +49,65 @@ export class ServiceCatalogClient {
     return (await this.client.get('/api/v1/catalog/internal/services')).data;
   }
 
+  async listCategoryContent() {
+    return (
+      await this.client.get('/api/v1/catalog/internal/categories/content', {
+        params: { includeInactive: true },
+      })
+    ).data;
+  }
+
+  async upsertCategoryContent(body: Record<string, unknown>) {
+    return (
+      await this.client.post('/api/v1/catalog/internal/categories/content', body)
+    ).data;
+  }
+
+  async listSkuContent() {
+    return (
+      await this.client.get('/api/v1/catalog/internal/skus/content', {
+        params: { includeInactive: true },
+      })
+    ).data;
+  }
+
+  async updateSkuScope(
+    categorySlug: string,
+    skuSlug: string,
+    displayName: string,
+    includes: string[],
+    excludes: string[],
+  ) {
+    const result = await this.listSkuContent();
+    if (!result?.success || !Array.isArray(result.data)) {
+      throw new Error('Task service returned an invalid service package content response');
+    }
+    const content = result.data.find(
+      (item: { categorySlug?: string; skuSlug?: string; _id?: string }) =>
+        item.categorySlug?.toLowerCase() === categorySlug.toLowerCase() &&
+        item.skuSlug?.toLowerCase() === skuSlug.toLowerCase(),
+    );
+
+    if (content?._id) {
+      return (
+        await this.client.patch(
+          `/api/v1/catalog/internal/skus/content/${encodeURIComponent(content._id)}`,
+          { displayName, includes, excludes },
+        )
+      ).data;
+    }
+
+    return (
+      await this.client.post('/api/v1/catalog/internal/skus/content', {
+        categorySlug,
+        skuSlug,
+        displayName,
+        includes,
+        excludes,
+      })
+    ).data;
+  }
+
   async listBookNowLocationAvailability(params: {
     search?: string;
     type?: string;

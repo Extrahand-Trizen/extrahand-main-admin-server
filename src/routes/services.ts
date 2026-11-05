@@ -8,6 +8,22 @@ const router = Router();
 
 router.use(verifyAuth, requireOperationsAdminOrSuperAdmin);
 router.get('/', ServiceCatalogController.list);
+router.get('/category-content', ServiceCatalogController.listCategoryContent);
+router.get('/sku-content', ServiceCatalogController.listSkuContent);
+router.put(
+  '/category-content/:slug',
+  auditMiddleware('service.scope_content_updated', 'service', (req) =>
+    String(req.params.slug),
+  ),
+  ServiceCatalogController.updateCategoryContent,
+);
+router.put(
+  '/sku-content/:categorySlug/:skuSlug',
+  auditMiddleware('service.package_scope_updated', 'service', (req) =>
+    `${req.params.categorySlug}:${req.params.skuSlug}`,
+  ),
+  ServiceCatalogController.updateSkuScope,
+);
 router.get('/book-now-availability', ServiceCatalogController.listBookNowLocationAvailability);
 router.patch(
   '/book-now-availability/:type/:id',
