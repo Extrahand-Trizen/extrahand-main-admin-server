@@ -99,6 +99,33 @@ export class AssignmentManagementController {
     }
   }
 
+  static async getEligiblePartnerAreaData(_req: Request, res: Response): Promise<void> {
+    try {
+      const [rules, emailSettings] = await Promise.all([
+        getRulesDocument(),
+        getTaskPostedEmailSettings(),
+      ]);
+      const excludedPhones = Array.from(new Set([
+        ...(rules.excludedPhones || []),
+        ...emailSettings.excludedPhones,
+      ].map(normalizePhone).filter(Boolean)));
+      const result = await userServiceClient.listApprovedPartnerAreaData(excludedPhones);
+      if (!result.success || !Array.isArray(result.data)) {
+        throw new Error('User service returned an invalid approved partner area response');
+      }
+      res.json({ success: true, data: result.data });
+    } catch (error: any) {
+      logger.error('Get eligible partner area data error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error ||
+          error.response?.data?.message ||
+          error.message ||
+          'Failed to load eligible partner area data',
+      });
+    }
+  }
+
   static async addPreferredPartner(req: Request, res: Response): Promise<void> {
     try {
       const { profileId, uid, name, phone, categories = [], areas = [] } = req.body;

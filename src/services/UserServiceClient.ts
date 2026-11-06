@@ -88,6 +88,13 @@ export class UserServiceClient {
     return response.data;
   }
 
+  async listApprovedPartnerAreaData(excludePhones: string[]): Promise<any> {
+    const response = await this.client.get('/api/v1/users/areas/eligible-partners', {
+      params: { excludePhones: excludePhones.join(',') },
+    });
+    return response.data;
+  }
+
   async listWhatsAppAudience(params: {
     app: 'customer_app' | 'helper_app' | 'seller_app';
     categories: string[];
