@@ -121,6 +121,16 @@ export class LocationPricingController {
     );
   }
 
+  static setHourlyHelperSlotSettings(req: Request, res: Response) {
+    const { type, id } = req.params;
+    const updatedBy = (req as any).user?.email || (req as any).user?.uid || 'admin';
+    return forward(
+      () => locationPricingClient.setHourlyHelperSlotSettings(type, id, req.body?.settings, updatedBy),
+      res,
+      'Update hourly helper slot settings',
+    );
+  }
+
   static removeHourlyHelperAvailability(req: Request, res: Response) {
     const { type, id } = req.params;
     const userEmail = (req as any).user?.email || (req as any).user?.uid || 'admin';

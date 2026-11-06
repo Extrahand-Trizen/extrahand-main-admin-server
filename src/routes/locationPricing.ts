@@ -32,6 +32,7 @@ router.post('/hourly-prices/resolve', LocationPricingController.resolveHourlyPri
 router.post('/resolve-address', LocationPricingController.resolveAddress);
 router.get('/hourly-availability', LocationPricingController.listHourlyHelperAvailabilities);
 router.post('/hourly-availability/:type/:id/toggle', auditMiddleware('hourly_availability.toggled', 'location'), LocationPricingController.toggleHourlyHelperAvailability);
+router.patch('/hourly-availability/:type/:id/slot-settings', auditMiddleware('hourly_availability.slot_settings.updated', 'location'), LocationPricingController.setHourlyHelperSlotSettings);
 router.delete('/hourly-availability/:type/:id', auditMiddleware('hourly_availability.removed', 'location'), LocationPricingController.removeHourlyHelperAvailability);
 router.get('/post-compare-availability/areas', LocationPricingController.listPostCompareAreaAvailabilities);
 router.post(

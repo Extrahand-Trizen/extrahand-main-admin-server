@@ -112,6 +112,10 @@ export class UserManagementController {
           typeof req.query.isCertified === 'string'
             ? req.query.isCertified === 'true'
             : undefined,
+        isPaymentTester:
+          typeof req.query.isPaymentTester === 'string'
+            ? req.query.isPaymentTester === 'true'
+            : undefined,
         createdFrom: req.query.createdFrom as string,
         createdTo: req.query.createdTo as string,
         area: req.query.area as string,

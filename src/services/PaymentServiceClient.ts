@@ -8,7 +8,7 @@ export class PaymentServiceClient {
 
   constructor() {
     this.client = axios.create({
-      baseURL: env.PAYMENT_SERVICE_URL || 'http://localhost:4009',
+      baseURL: env.PAYMENT_SERVICE_URL,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -59,6 +59,11 @@ export class PaymentServiceClient {
 
   async patch(path: string, body: Record<string, any>): Promise<any> {
     const response = await this.client.patch(path, body);
+    return response.data;
+  }
+
+  async put(path: string, body: Record<string, any>): Promise<any> {
+    const response = await this.client.put(path, body);
     return response.data;
   }
 

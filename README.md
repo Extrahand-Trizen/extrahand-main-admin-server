@@ -10,6 +10,7 @@ Main Admin Service for ExtraHand platform - handles authentication, Super Admin 
 - **Task Management**: View, update, delete tasks and applications
 - **Permission System**: Role-based access control with granular permissions
 - **Audit Logging**: Comprehensive audit trail for all admin actions
+- **Coupon Management**: Authenticated proxy for coupon codes and coupon-portal catalog tools
 
 ## Architecture
 
@@ -21,6 +22,7 @@ This service acts as:
 ## Environment Variables
 
 See `.env.example` for required environment variables.
+Operations Portal coupon creation, editing, listing, bulk creation, status changes, and deletion are handled directly by this service against the shared `coupons` collection. Set `MONGO_DB` to the same database used by coupon-service (`MONGODB_DB`) so the mobile coupon-validation service sees the portal's changes. Catalog tabs continue to use the task-service catalog API through the main admin server.
 
 ## Installation
 

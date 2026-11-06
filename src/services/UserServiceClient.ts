@@ -75,6 +75,7 @@ export class UserServiceClient {
     area?: string;
     isAadhaarVerified?: boolean;
     isCertified?: boolean;
+    isPaymentTester?: boolean;
     createdFrom?: string;
     createdTo?: string;
     sortBy?: string;

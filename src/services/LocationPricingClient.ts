@@ -82,6 +82,13 @@ export class LocationPricingClient {
     return (await this.client.post(`/api/v1/catalog/internal/location-pricing/hourly-availability/${encodeURIComponent(type)}/${encodeURIComponent(id)}/toggle`, { isEnabled, updatedBy })).data;
   }
 
+  async setHourlyHelperSlotSettings(type: string, id: string, settings: unknown, updatedBy?: string) {
+    return (await this.client.patch(
+      `/api/v1/catalog/internal/location-pricing/hourly-availability/${encodeURIComponent(type)}/${encodeURIComponent(id)}/slot-settings`,
+      { settings, updatedBy },
+    )).data;
+  }
+
   async removeHourlyHelperAvailability(type: string, id: string, removedBy?: string) {
     return (await this.client.delete(`/api/v1/catalog/internal/location-pricing/hourly-availability/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { data: { removedBy } })).data;
   }
