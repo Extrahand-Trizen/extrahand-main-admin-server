@@ -145,7 +145,12 @@ export class AnalyticsController {
     try {
       const results = await Promise.allSettled([
         userServiceClient.getRoleCounts(),
-        userServiceClient.getHelperAadhaarVerifiedCount(),
+        userServiceClient.listUsers({
+          role: 'partner',
+          isAadhaarVerified: true,
+          page: 1,
+          limit: 1,
+        }),
         userServiceClient.getHelperCategoryCounts(),
         taskServiceClient.listTasks({ page: 1, limit: 1 }),
         TaskManagementController.countCurrentlyOpenTasks(),
@@ -168,14 +173,9 @@ export class AnalyticsController {
         totalPlatformUsers: Number(userCountsRaw.totalProfiles || 0),
       };
 
-      // user-service returns { taskersAadhaarVerified: n } — do not Number() the whole object
-      const aadhaarPayload =
-        results[1].status === 'fulfilled' ? results[1].value?.data : undefined;
-      const HelperAadhaarVerified = Number(
-        (aadhaarPayload as any)?.taskersAadhaarVerified ??
-          (aadhaarPayload as any)?.count ??
-          0,
-      );
+      const partnerAadhaarResult =
+        results[1].status === 'fulfilled' ? results[1].value : {};
+      const partnerAadhaarVerified = extractTotal(partnerAadhaarResult);
       const helperCategoryCounts =
         results[2].status === 'fulfilled'
           ? Array.isArray(results[2].value?.data?.categories)
@@ -201,13 +201,15 @@ export class AnalyticsController {
         },
         Helpers: {
           totalRegistered: userCounts.Helpers,
-          aadhaarVerified: HelperAadhaarVerified,
           categoryCounts: helperCategoryCounts,
           categorySummary: {
             totalHelpers: Number(helperCategorySummary?.totalHelpers || 0),
             categorizedHelpers: Number(helperCategorySummary?.categorizedHelpers || 0),
             uncategorizedHelpers: Number(helperCategorySummary?.uncategorizedHelpers || 0),
           },
+        },
+        Partners: {
+          aadhaarVerified: partnerAadhaarVerified,
         },
         tasks: {
           total: extractTotal(totalTaskResult),

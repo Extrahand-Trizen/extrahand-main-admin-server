@@ -179,8 +179,15 @@ function normalizeAudience(input: AudienceInput): AudienceInput {
       'Select at least one category and city with work areas for the Partner App',
     );
   }
-  if (input.app !== 'helper_app' && (categories.length || cities.length || workAreas.length)) {
-    throw new WhatsAppCampaignInputError('Category and city filters are only available for the Partner App');
+  if (input.app === 'customer_app' && (categories.length || workAreas.length)) {
+    throw new WhatsAppCampaignInputError(
+      'Category and work area filters are only available for the Partner App',
+    );
+  }
+  if (input.app === 'seller_app' && (categories.length || cities.length || workAreas.length)) {
+    throw new WhatsAppCampaignInputError(
+      'Audience filters are only available for the Customer and Partner Apps',
+    );
   }
   return { ...input, categories, cities, workAreas };
 }
