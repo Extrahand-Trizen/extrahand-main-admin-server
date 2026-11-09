@@ -229,10 +229,37 @@ export class AssignmentManagementController {
         areas: Array.isArray(partner.areas) ? partner.areas.map(String) : [],
         priority: index, active: partner.active !== false,
       }));
-      const existingIndex = rules.areaRules.findIndex((rule) => rule.area.toLowerCase() === normalizedArea.toLowerCase());
-      const nextRule = { area: normalizedArea, category: category ? String(category) : undefined, zone: String(zone), workTypes: Array.isArray(workTypes) ? workTypes.map(String) : ['hourly'], preferredPartners: partners, active: true };
-      if (existingIndex >= 0) rules.areaRules[existingIndex] = nextRule as any;
-      else rules.areaRules.push(nextRule as any);
+      const normalizedCategory = category ? String(category).trim().toLowerCase() : '';
+      const normalizedWorkTypes = Array.isArray(workTypes) && workTypes.length
+        ? workTypes.map(String)
+        : ['hourly'];
+      const existingIndex = rules.areaRules.findIndex((rule) =>
+        rule.area.trim().toLowerCase() === normalizedArea.toLowerCase() &&
+        String(rule.category || '').trim().toLowerCase() === normalizedCategory &&
+        (rule.workTypes || []).some((workType) => normalizedWorkTypes.includes(String(workType))),
+      );
+      const nextRule = {
+        area: normalizedArea,
+        category: category ? String(category).trim() : undefined,
+        zone: String(zone),
+        workTypes: normalizedWorkTypes,
+        preferredPartners: partners,
+        active: true,
+      };
+      if (existingIndex >= 0) {
+        const existingRule = rules.areaRules[existingIndex];
+        const remainingWorkTypes = (existingRule.workTypes || []).filter(
+          (workType) => !normalizedWorkTypes.includes(String(workType)),
+        );
+        if (remainingWorkTypes.length) {
+          existingRule.workTypes = remainingWorkTypes;
+          rules.areaRules.push(nextRule as any);
+        } else {
+          rules.areaRules[existingIndex] = nextRule as any;
+        }
+      } else {
+        rules.areaRules.push(nextRule as any);
+      }
       await rules.save();
       res.json({ success: true, data: normalizeRules(rules) });
     } catch (error: any) {
