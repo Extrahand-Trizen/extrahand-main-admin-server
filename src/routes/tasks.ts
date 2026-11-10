@@ -12,7 +12,7 @@ router.use(verifyAuth);
 router.get(
   '/',
   requirePermission(`${Resource.TASK}.${Action.LIST}`),
-  TaskManagementController.listTasks
+  TaskManagementController.listTeamTasks
 );
 
 // Delete-request workflows (must come before "/:taskId" routes)
