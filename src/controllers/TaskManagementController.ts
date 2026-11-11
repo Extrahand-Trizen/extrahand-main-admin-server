@@ -724,6 +724,22 @@ export class TaskManagementController {
    * List tasks
    */
   static async listTasks(req: Request, res: Response): Promise<void> {
+    return TaskManagementController.listTasksWithDefaultPostedBy(req, res);
+  }
+
+  static async listTeamTasks(req: Request, res: Response): Promise<void> {
+    return TaskManagementController.listTasksWithDefaultPostedBy(req, res, 'team');
+  }
+
+  static async listCustomerTasks(req: Request, res: Response): Promise<void> {
+    return TaskManagementController.listTasksWithDefaultPostedBy(req, res, 'customer');
+  }
+
+  private static async listTasksWithDefaultPostedBy(
+    req: Request,
+    res: Response,
+    defaultPostedBy?: string,
+  ): Promise<void> {
     try {
       const customerFilter =
         (req.query.customerId as string) || (req.query.CustomerId as string);
@@ -732,7 +748,9 @@ export class TaskManagementController {
         : [];
       const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
-      const postedByParam = String(req.query.postedBy || '').trim().toLowerCase();
+      const postedByParam = String(req.query.postedBy || defaultPostedBy || '')
+        .trim()
+        .toLowerCase();
       const requestedStatus = String(req.query.status || '').trim();
       const bookingSource = String(req.query.bookingSource || '').trim();
       const paymentType = String(req.query.paymentType || '').trim(); // 'paid' | 'free_coupon' | ''
