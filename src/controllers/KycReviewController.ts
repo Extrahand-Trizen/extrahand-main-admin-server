@@ -69,6 +69,29 @@ function resolveProfileUid(user: any, fallbackUserId: string): string {
   return String(user?.uid || user?.userId || fallbackUserId).trim();
 }
 
+function latestPendingManualUploadReviews(reviews: any[]): Map<string, any> {
+  const latestByUserId = new Map<string, any>();
+  const timestamp = (review: any) =>
+    new Date(review.uploadedAt || review.updatedAt || review.createdAt || 0).getTime();
+
+  for (const review of reviews) {
+    if (
+      review.reviewStatus !== 'pending' ||
+      !String(review.sessionId || '').startsWith('admin_upload_')
+    ) {
+      continue;
+    }
+
+    const userId = String(review.userId || '');
+    const existing = latestByUserId.get(userId);
+    if (!existing || timestamp(review) > timestamp(existing)) {
+      latestByUserId.set(userId, review);
+    }
+  }
+
+  return latestByUserId;
+}
+
 function isProfileAadhaarVerified(user: any): boolean {
   if (!user) return false;
   if (user.isAadhaarVerified === true) return true;
@@ -395,7 +418,7 @@ async function buildReviewRows() {
 
   const [reviewDocs, aadhaarSessions] = await Promise.all([
     KycReview.find({ userId: { $in: Array.from(new Set([...userIds, ...profileUids])) } })
-      .select('userId sessionId reviewStatus followUpStatus followUpDate rejectionReason reviewedBy reviewedAt uploadedBy uploadedAt claimedBy claimedAt')
+      .select('userId sessionId reviewStatus followUpStatus followUpDate rejectionReason reviewedBy reviewedAt uploadedBy uploadedAt claimedBy claimedAt createdAt updatedAt')
       .lean(),
     profileUids.size > 0
       ? KycSession.aggregate([
@@ -458,6 +481,7 @@ async function buildReviewRows() {
   }
 
   const reviewMap = new Map<string, any>();
+  const pendingManualUploadReviews = latestPendingManualUploadReviews(reviewDocs);
   for (const review of reviewDocs) {
     reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
   }
@@ -474,6 +498,11 @@ async function buildReviewRows() {
 
     // aadhaarKyc.verificationId = the `verification_id` (eh_...) string stored in KycSession.
     // aadhaarKyc.id             = MongoDB _id — do NOT use for KycSession lookup.
+    const pendingManualUploadReview =
+      pendingManualUploadReviews.get(profileUid) || pendingManualUploadReviews.get(userId);
+    const manualSessionId = String(
+      pendingManualUploadReview?.sessionId || notification?.metadata?.sessionId || '',
+    );
     const verificationId = String(
       user?.aadhaarKyc?.verificationId ||
       notification?.metadata?.verificationId ||
@@ -481,12 +510,14 @@ async function buildReviewRows() {
       '',
     );
     // sessionId is used for KycReview record keying (can be verificationId or a legacy id)
-    const sessionId = verificationId || String(user?.aadhaarKyc?.id || '');
+    const sessionId = manualSessionId.startsWith('admin_upload_')
+      ? manualSessionId
+      : verificationId || String(user?.aadhaarKyc?.id || '');
     
     // Check both profileUid and unresolved userId keys in review maps
     const exactReview = reviewMap.get(`${profileUid}:${sessionId}`) || reviewMap.get(`${userId}:${sessionId}`) || null;
     const previousReview = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
-    const review = exactReview || previousReview || null;
+    const review = pendingManualUploadReview || exactReview || previousReview || null;
     const hasNewUploadAfterReview =
       !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
 
@@ -496,7 +527,7 @@ async function buildReviewRows() {
     // Detect manual admin-upload sessions (sessionId starts with "admin_upload_").
     // The review document holds the canonical admin sessionId even when verificationId
     // points to an older DigiLocker session, so we must use it for MinIO lookup.
-    const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
+    const isManualUpload = sessionId.startsWith('admin_upload_');
     const uploadedBy = review?.uploadedBy || null;
 
     // Resolve the admin upload session ID from the review record if available.
@@ -676,6 +707,7 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
 
   const reviewDocs = await KycReview.find({ userId: { $in: Array.from(allLookupIds) } }).lean();
   const reviewMap = new Map<string, any>();
+  const pendingManualUploadReviews = latestPendingManualUploadReviews(reviewDocs);
   for (const review of reviewDocs) {
     reviewMap.set(`${review.userId}:${review.sessionId || ''}`, review);
   }
@@ -690,24 +722,31 @@ async function buildReviewRowsForUserIds(req: Request, userIds: string[]) {
     const user = resolved?.user || null;
     const profileUid = resolved?.profileUid || userId;
 
+    const pendingManualUploadReview =
+      pendingManualUploadReviews.get(profileUid) || pendingManualUploadReviews.get(userId);
+    const manualSessionId = String(
+      pendingManualUploadReview?.sessionId || notification?.metadata?.sessionId || '',
+    );
     const verificationId = String(
       user?.aadhaarKyc?.verificationId ||
       notification?.metadata?.verificationId ||
       notification?.metadata?.sessionId ||
       '',
     );
-    const sessionId = verificationId || String(user?.aadhaarKyc?.id || '');
+    const sessionId = manualSessionId.startsWith('admin_upload_')
+      ? manualSessionId
+      : verificationId || String(user?.aadhaarKyc?.id || '');
 
     const exactReview = reviewMap.get(`${profileUid}:${sessionId}`) || reviewMap.get(`${userId}:${sessionId}`) || null;
     const previousReview = fallbackReviewMap.get(profileUid) || fallbackReviewMap.get(userId) || null;
-    const review = exactReview || previousReview || null;
+    const review = pendingManualUploadReview || exactReview || previousReview || null;
     const hasNewUploadAfterReview =
       !exactReview && Boolean(sessionId) && Boolean(previousReview?.sessionId);
 
     const claimedBy = review?.claimedBy || null;
     const claimedAt = review?.claimedAt || null;
 
-    const isManualUpload = Boolean(sessionId && String(sessionId).startsWith('admin_upload_'));
+    const isManualUpload = sessionId.startsWith('admin_upload_');
     const uploadedBy = review?.uploadedBy || null;
 
     const adminSessionId =
@@ -1626,8 +1665,16 @@ export class KycReviewController {
 
       const query = sessionId ? { userId: profileUid, sessionId } : { userId: profileUid };
       const review = await KycReview.findOne(query).sort({ updatedAt: -1 }).lean();
+      const pendingManualUploadReview = await KycReview.findOne({
+        userId: { $in: Array.from(new Set([profileUid, userId])) },
+        sessionId: { $regex: /^admin_upload_/ },
+        reviewStatus: 'pending',
+      })
+        .sort({ uploadedAt: -1, updatedAt: -1 })
+        .lean();
 
       const adminSessionId =
+        pendingManualUploadReview?.sessionId ||
         (review?.sessionId && String(review.sessionId).startsWith('admin_upload_')
           ? review.sessionId
           : undefined) ||
