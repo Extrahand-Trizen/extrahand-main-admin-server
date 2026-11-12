@@ -74,6 +74,7 @@ export class UserServiceClient {
     workArea?: string;
     area?: string;
     isAadhaarVerified?: boolean;
+    registrationCompletion?: 'complete' | 'incomplete';
     isCertified?: boolean;
     isPaymentTester?: boolean;
     createdFrom?: string;

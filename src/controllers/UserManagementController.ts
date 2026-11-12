@@ -95,6 +95,12 @@ export class UserManagementController {
    */
   static async listUsers(req: Request, res: Response): Promise<void> {
     try {
+      const registrationCompletion: 'complete' | 'incomplete' | undefined =
+        req.query.registrationCompletion === 'complete'
+          ? 'complete'
+          : req.query.registrationCompletion === 'incomplete'
+            ? 'incomplete'
+            : undefined;
       const params = {
         page: req.query.page ? Number(req.query.page) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined,
@@ -108,6 +114,7 @@ export class UserManagementController {
           typeof req.query.isAadhaarVerified === 'string'
             ? req.query.isAadhaarVerified === 'true'
             : undefined,
+        registrationCompletion,
         isCertified:
           typeof req.query.isCertified === 'string'
             ? req.query.isCertified === 'true'
