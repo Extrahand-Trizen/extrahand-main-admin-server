@@ -18,6 +18,7 @@ import {
   WhatsAppCampaignInputError,
 } from '../services/WhatsAppCampaignService';
 import { userServiceClient } from '../services/UserServiceClient';
+import { taskServiceClient } from '../services/TaskServiceClient';
 import type { WhatsAppCampaignApp } from '../models/WhatsAppNotificationCampaign';
 
 const WHATSAPP_APPS: WhatsAppCampaignApp[] = [
@@ -37,6 +38,77 @@ function parsePage(value: unknown, fallback: number, max: number): number | null
 }
 
 const DISPATCH_STAGES = ['preferred', 'area_rule', 'all'] as const;
+
+type WorkOfferCandidate = {
+  dispatchStage?: string;
+  status?: string;
+  responseStatus?: string;
+};
+
+type WorkOfferTaskState = {
+  status?: string;
+  assigneeId?: unknown;
+  assigneeUid?: unknown;
+  partnerId?: unknown;
+  partnerUid?: unknown;
+  dispatchLogs?: Array<{ candidates?: WorkOfferCandidate[] }>;
+  dispatchProgress?: {
+    stages?: Array<{
+      stage?: string;
+      eligibleCount?: number;
+      acceptedCount?: number;
+      expiresAt?: string;
+    }>;
+  };
+  assignmentOffer?: {
+    stage?: string;
+    expiresAt?: string | Date | null;
+  };
+};
+
+async function canSendOtherEligibleStage(taskId: string): Promise<boolean> {
+  const response = await taskServiceClient.getTask(taskId);
+  const task: WorkOfferTaskState | undefined = response?.data;
+  if (!task || typeof task !== 'object') {
+    throw new Error('Task service returned an invalid task response');
+  }
+  if (
+    task.status !== 'open' ||
+    task.assigneeId ||
+    task.assigneeUid ||
+    task.partnerId ||
+    task.partnerUid
+  ) {
+    return false;
+  }
+
+  const preferredCandidates = (task.dispatchLogs || [])
+    .flatMap((area) => area.candidates || [])
+    .filter((candidate) => candidate.dispatchStage === 'area_rule');
+  const preferredProgress = task.dispatchProgress?.stages?.find(
+    (stage) => stage.stage === 'area_rule',
+  );
+  const hasEligiblePreferredPartners =
+    preferredCandidates.some((candidate) => candidate.status !== 'ineligible') ||
+    (preferredProgress?.eligibleCount || 0) > 0;
+  if (!hasEligiblePreferredPartners) return true;
+
+  const preferredAccepted =
+    preferredCandidates.some((candidate) => candidate.responseStatus === 'accepted') ||
+    (preferredProgress?.acceptedCount || 0) > 0;
+  if (preferredAccepted) return false;
+
+  const expiry =
+    task.assignmentOffer?.stage === 'area_rule'
+      ? task.assignmentOffer.expiresAt
+      : preferredProgress?.expiresAt;
+  const expiryTime = expiry instanceof Date
+    ? expiry.getTime()
+    : expiry
+      ? Date.parse(expiry)
+      : Number.NaN;
+  return Number.isFinite(expiryTime) && expiryTime <= Date.now();
+}
 
 export class WhatsAppNotificationController {
   static async getPartnerCategories(_req: Request, res: Response): Promise<void> {
@@ -276,6 +348,16 @@ export class WhatsAppNotificationController {
     }
 
     try {
+      if (
+        stage === 'all' &&
+        !(await canSendOtherEligibleStage(taskId))
+      ) {
+        res.status(409).json({
+          success: false,
+          error: 'Other eligible partner notifications are unavailable because the work is assigned, a preferred partner accepted, or the 45-minute window has not ended',
+        });
+        return;
+      }
       const data = await dispatchWorkWhatsApp({
         taskId,
         stage,
@@ -351,6 +433,16 @@ export class WhatsAppNotificationController {
       return;
     }
     try {
+      if (
+        stage === 'all' &&
+        !(await canSendOtherEligibleStage(taskId))
+      ) {
+        res.status(409).json({
+          success: false,
+          error: 'Other eligible partner notifications are unavailable because the work is assigned, a preferred partner accepted, or the 45-minute window has not ended',
+        });
+        return;
+      }
       const data = await resendWorkWhatsApp(
         {
           taskId,

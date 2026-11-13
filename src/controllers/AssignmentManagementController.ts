@@ -51,14 +51,10 @@ export class AssignmentManagementController {
 
   static async getEligiblePartners(req: Request, res: Response): Promise<void> {
     try {
-      const [rules, emailSettings] = await Promise.all([
-        getRulesDocument(),
-        getTaskPostedEmailSettings(),
-      ]);
-      const excludedPhones = Array.from(new Set([
-        ...(rules.excludedPhones || []),
-        ...emailSettings.excludedPhones,
-      ].map(normalizePhone).filter(Boolean)));
+      const emailSettings = await getTaskPostedEmailSettings();
+      const excludedPhones = Array.from(new Set(
+        emailSettings.excludedPhones.map(normalizePhone).filter(Boolean),
+      ));
       const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
       const pageSize = 50;
       const requestedPage = Number(req.query.page ?? 1);
@@ -101,14 +97,10 @@ export class AssignmentManagementController {
 
   static async getEligiblePartnerAreaData(_req: Request, res: Response): Promise<void> {
     try {
-      const [rules, emailSettings] = await Promise.all([
-        getRulesDocument(),
-        getTaskPostedEmailSettings(),
-      ]);
-      const excludedPhones = Array.from(new Set([
-        ...(rules.excludedPhones || []),
-        ...emailSettings.excludedPhones,
-      ].map(normalizePhone).filter(Boolean)));
+      const emailSettings = await getTaskPostedEmailSettings();
+      const excludedPhones = Array.from(new Set(
+        emailSettings.excludedPhones.map(normalizePhone).filter(Boolean),
+      ));
       const result = await userServiceClient.listApprovedPartnerAreaData(excludedPhones);
       if (!result.success || !Array.isArray(result.data)) {
         throw new Error('User service returned an invalid approved partner area response');
