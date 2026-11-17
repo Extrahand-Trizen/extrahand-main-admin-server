@@ -5,7 +5,6 @@ import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import { TaskDeleteRequest } from '../models/TaskDeleteRequest';
-import { TaskCallRecord } from '../models/TaskCallRecord';
 import { AdminNotification } from '../models/AdminNotification';
 import { AdminUser } from '../models/AdminUser';
 import { DashboardType } from '../types/dashboard';
@@ -34,6 +33,7 @@ import {
 import { TaskPostedEmailAttempt } from '../models/TaskPostedEmailAttempt';
 import { Task } from '../models/Task';
 import { Profile } from '../models/Profile';
+import { CouponRedemption } from '../models/CouponRedemption';
 import mongoose from 'mongoose';
 
 const TASKS_CACHE_TTL_MS = 30_000; // 30 seconds
@@ -152,35 +152,63 @@ function isTaskOverdue(task: any, now: Date): boolean {
   return scheduledStart !== null && scheduledStart <= now;
 }
 
-async function enrichTasksWithTaskCallStatus(tasks: any[]): Promise<any[]> {
-  const taskIds = Array.from(
-    new Set(
-      tasks
-        .map((task) => String(task?.taskId || '').trim())
-        .filter(Boolean),
-    ),
-  );
-
-  if (taskIds.length === 0) return tasks;
-
-  const records = await TaskCallRecord.find({ taskId: { $in: taskIds } })
-    .select('taskId status followUpDate updatedAt')
-    .lean();
-  const recordMap = new Map(records.map((record) => [record.taskId, record]));
-
-  return tasks.map((task) => {
-    const record = recordMap.get(String(task.taskId));
-    return {
-      ...task,
-      taskCallStatus: record?.status || 'not_updated',
-      taskCallFollowUpDate: record?.followUpDate || null,
-      taskCallUpdatedAt: record?.updatedAt || null,
-    };
-  });
-}
-
 function extractTaskId(task: any): string {
   return normalizeTaskIdForAssignment(task?.taskId ?? task?._id ?? task?.id);
+}
+
+type RedeemedCouponDetails = {
+  couponCode: string;
+  discountAmount: number | null;
+  flowType: string | null;
+  redemptionScope: string | null;
+  bookingOrderId: string | null;
+  redeemedAt: Date | null;
+};
+
+async function loadRedeemedCouponMap(taskIds: string[]): Promise<Map<string, RedeemedCouponDetails>> {
+  const uniqueTaskIds = Array.from(new Set(taskIds.map((id) => String(id).trim()).filter(Boolean)));
+  if (uniqueTaskIds.length === 0) return new Map();
+
+  const redemptions = await CouponRedemption.find({
+    taskId: { $in: uniqueTaskIds },
+    status: 'REDEEMED',
+  })
+    .select('taskId couponCode discountAmount flowType redemptionScope bookingOrderId redeemedAt createdAt')
+    .sort({ redeemedAt: -1, createdAt: -1 })
+    .lean();
+
+  const couponMap = new Map<string, RedeemedCouponDetails>();
+  for (const redemption of redemptions) {
+    const taskId = String(redemption.taskId || '').trim().toLowerCase();
+    const couponCode = String(redemption.couponCode || '').trim();
+    if (taskId && couponCode && !couponMap.has(taskId)) {
+      couponMap.set(taskId, {
+        couponCode,
+        discountAmount: typeof redemption.discountAmount === 'number' &&
+          Number.isFinite(redemption.discountAmount)
+          ? redemption.discountAmount
+          : null,
+        flowType: redemption.flowType || null,
+        redemptionScope: redemption.redemptionScope || null,
+        bookingOrderId: redemption.bookingOrderId || null,
+        redeemedAt: redemption.redeemedAt || null,
+      });
+    }
+  }
+  return couponMap;
+}
+
+async function enrichTasksWithRedeemedCoupon(tasks: any[]): Promise<any[]> {
+  const couponMap = await loadRedeemedCouponMap(tasks.map(extractTaskId));
+  return tasks.map((task) => {
+    const couponRedemption = couponMap.get(extractTaskId(task).toLowerCase()) || null;
+    return {
+      ...task,
+      couponCode: couponRedemption?.couponCode || task.couponCode || null,
+      couponDiscount: couponRedemption?.discountAmount ?? task.couponDiscount ?? null,
+      couponRedemption,
+    };
+  });
 }
 
 async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
@@ -403,7 +431,7 @@ async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise
     page += 1;
   } while (page <= totalPages && tasks.length < maxTasks);
 
-  return tasks.slice(0, maxTasks);
+  return enrichTasksWithRedeemedCoupon(tasks.slice(0, maxTasks));
 }
 
 function extractProposedAmount(application: any): number | undefined {
@@ -514,11 +542,8 @@ export class TaskManagementController {
         .filter((id) => /^[0-9a-fA-F]{24}$/.test(id))
         .map((id) => new mongoose.Types.ObjectId(id));
 
-      const [assignments, taskCalls, orders, profiles, settings] = await Promise.all([
+      const [assignments, orders, profiles, settings, redeemedCouponMap] = await Promise.all([
         TaskAssignment.find({ taskId: { $in: taskIds } }).lean(),
-        TaskCallRecord.find({ taskId: { $in: taskIds } })
-          .select('taskId status followUpDate updatedAt')
-          .lean(),
         orderIds.length > 0
           ? BookingOrder.find({ orderId: { $in: orderIds } })
               .select('orderId total totalAfterCoupon couponCode couponDiscount')
@@ -535,19 +560,13 @@ export class TaskManagementController {
               .lean()
           : Promise.resolve([]),
         getTaskPostedEmailSettings(),
+        loadRedeemedCouponMap(taskIds),
       ]);
 
       const assignmentMap = new Map<string, any>();
       for (const a of assignments) {
         if (a.taskId) {
           assignmentMap.set(String(a.taskId).toLowerCase(), a);
-        }
-      }
-
-      const callMap = new Map<string, any>();
-      for (const c of taskCalls) {
-        if (c.taskId) {
-          callMap.set(String(c.taskId), c);
         }
       }
 
@@ -575,7 +594,6 @@ export class TaskManagementController {
         const helperProfile = assigneeId ? profileMap.get(assigneeId) : null;
 
         const assignment = assignmentMap.get(taskId.toLowerCase());
-        const callRecord = callMap.get(taskId);
         const order = t.bookingOrderId ? orderMap.get(String(t.bookingOrderId)) : null;
 
         const customerPhone =
@@ -637,15 +655,14 @@ export class TaskManagementController {
                 email: assignment.assignedToEmail,
               }
             : null,
-          taskCallStatus: callRecord?.status || 'not_updated',
-          taskCallFollowUpDate: callRecord?.followUpDate || null,
-          taskCallUpdatedAt: callRecord?.updatedAt || null,
           isHourly,
           paymentAmount,
           isFreeCoupon,
           paymentType: isFreeCoupon ? 'free_coupon' : 'paid',
-          couponCode: order?.couponCode || null,
-          couponDiscount: order?.couponDiscount || null,
+          couponCode: redeemedCouponMap.get(taskId.toLowerCase())?.couponCode || order?.couponCode || null,
+          couponDiscount:
+            redeemedCouponMap.get(taskId.toLowerCase())?.discountAmount ?? order?.couponDiscount ?? null,
+          couponRedemption: redeemedCouponMap.get(taskId.toLowerCase()) || null,
           postedBy: isTeamPosted ? 'team' : 'customer',
           isTeamPosted,
         };
@@ -746,7 +763,6 @@ export class TaskManagementController {
       const customerFilters = customerFilter
         ? customerFilter.split(',').map((id) => id.trim()).filter(Boolean)
         : [];
-      const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
       const postedByParam = String(req.query.postedBy || defaultPostedBy || '')
         .trim()
@@ -857,26 +873,21 @@ export class TaskManagementController {
         );
       }
 
-      // 7. Follow-up status
-      if (followUpStatus && followUpStatus !== 'all') {
-        filtered = filtered.filter((t) => t.taskCallStatus === followUpStatus);
-      }
-
-      // 8. Assigned Ops Admin
+      // 7. Assigned Ops Admin
       if (assigneeFilter) {
         filtered = filtered.filter((t) =>
           taskMatchesAssigneeFilter(t.assignedTo, assigneeFilter, assigneeFilterUserId),
         );
       }
 
-      // 9. Posted by (team vs customer)
+      // 8. Posted by (team vs customer)
       if (postedByParam === 'team') {
         filtered = filtered.filter((t) => t.postedBy === 'team');
       } else if (postedByParam === 'customer') {
         filtered = filtered.filter((t) => t.postedBy === 'customer');
       }
 
-      // 10. Payment type
+      // 9. Payment type
       if (paymentType && paymentType !== 'all') {
         if (paymentType === 'free_coupon') {
           filtered = filtered.filter((t) => t.isFreeCoupon === true);
@@ -885,7 +896,7 @@ export class TaskManagementController {
         }
       }
 
-      // 11. Scheduled Date Range
+      // 10. Scheduled Date Range
       if (scheduledDateFrom || scheduledDateTo) {
         const fromDate = scheduledDateFrom
           ? new Date(`${scheduledDateFrom}T00:00:00.000+05:30`)
@@ -905,7 +916,7 @@ export class TaskManagementController {
         });
       }
 
-      // 12. Work creation date range
+      // 11. Work creation date range
       if (createdFrom || createdTo) {
         const fromDate = createdFrom ? new Date(createdFrom) : null;
         const toDate = createdTo ? new Date(createdTo) : null;
@@ -929,7 +940,7 @@ export class TaskManagementController {
         });
       }
 
-      // 13. Sorting
+      // 12. Sorting
       const isAsc = sortOrder === 'asc';
       filtered = [...filtered].sort((a, b) => {
         if (sortBy === 'scheduledDate') {
@@ -957,7 +968,7 @@ export class TaskManagementController {
         return isAsc ? crA - crB : crB - crA;
       });
 
-      // 14. Pagination
+      // 13. Pagination
       const total = filtered.length;
       const pages = Math.max(1, Math.ceil(total / limit));
       const start = (page - 1) * limit;
@@ -1031,16 +1042,22 @@ export class TaskManagementController {
       const requesterId = normalizeTaskIdForAssignment(
         normalizedTask.CustomerId || normalizedTask.customerId || normalizedTask.requesterId,
       );
+      const bookingOrderId = String(normalizedTask.bookingOrderId || '').trim();
 
       // Run task, assignment, and poster metadata enrichment in parallel.
       // Previously they ran sequentially which caused 10+ second load times because each
       // awaited the previous (DB query → admin-service DB query → user-service HTTP call).
-      const [withCallStatus, withAssignedTo, withAssigneeName, customerProfileBatch, emailSettings] = await Promise.all([
-        enrichTasksWithTaskCallStatus([normalizedTask]),
+      const [withAssignedTo, withAssigneeName, customerProfileBatch, emailSettings, couponEnrichedTasks, bookingOrder] = await Promise.all([
         enrichTasksWithAssignedTo([normalizedTask]),
         enrichTasksWithAssigneeName([normalizedTask]),
         requesterId ? userServiceClient.getProfilesBatch([requesterId]) : Promise.resolve(null),
         getTaskPostedEmailSettings(),
+        enrichTasksWithRedeemedCoupon([normalizedTask]),
+        bookingOrderId
+          ? BookingOrder.findOne({ orderId: bookingOrderId })
+              .select('couponCode couponDiscount')
+              .lean()
+          : Promise.resolve(null),
       ]);
       const customerProfile = Array.isArray(customerProfileBatch?.profiles)
         ? customerProfileBatch.profiles[0]
@@ -1059,14 +1076,23 @@ export class TaskManagementController {
       // Merge only the fields each enrichment adds, keeping normalizedTask as the base
       // so that assignment fields (assigneeId, assigneeName, etc.) are never overwritten
       // by a stale enrichment result.
+      const couponRedemption = couponEnrichedTasks[0]?.couponRedemption || null;
       const enrichedTask = {
         ...normalizedTask,
+        couponCode:
+          couponRedemption?.couponCode ||
+          bookingOrder?.couponCode ||
+          couponEnrichedTasks[0]?.couponCode ||
+          normalizedTask.couponCode ||
+          null,
+        couponDiscount:
+          couponRedemption?.discountAmount ??
+          bookingOrder?.couponDiscount ??
+          couponEnrichedTasks[0]?.couponDiscount ??
+          null,
+        couponRedemption,
         postedBy: isTeamPosted ? 'team' : 'customer',
         isTeamPosted,
-        // from enrichTasksWithTaskCallStatus
-        taskCallStatus: withCallStatus[0]?.taskCallStatus,
-        taskCallFollowUpDate: withCallStatus[0]?.taskCallFollowUpDate,
-        taskCallUpdatedAt: withCallStatus[0]?.taskCallUpdatedAt,
         // from enrichTasksWithAssignedTo (CRM admin assignment, not helper)
         assignedTo: withAssignedTo[0]?.assignedTo,
         // from enrichTasksWithAssigneeName (resolved display name for helper)
