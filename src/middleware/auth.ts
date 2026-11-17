@@ -42,7 +42,14 @@ export const verifyAuth = async (
     const payload = AuthService.verifyAccessToken(token);
     
     // Fetch user from database to get latest permissions
+    const isAreaRuleSave =
+      req.method === 'POST' &&
+      req.originalUrl.split('?')[0].endsWith('/assignment-management/area-rules');
+    const authDbStartedAt = Date.now();
     const user = await AdminUser.findOne({ userId: payload.userId });
+    if (isAreaRuleSave) {
+      res.setHeader('Server-Timing', `auth-db;dur=${Date.now() - authDbStartedAt}`);
+    }
     
     if (!user || user.status !== 'active') {
       res.status(401).json({ success: false, error: 'User not found or inactive' });
