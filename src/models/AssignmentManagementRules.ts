@@ -7,6 +7,13 @@ export interface PreferredAssignmentPartner {
   phone?: string;
   categories: string[];
   areas: string[];
+  isAadhaarVerified?: boolean;
+  addedBy?: {
+    userId: string;
+    name: string;
+    role: string;
+    isSuperAdmin: boolean;
+  };
   priority: number;
   active: boolean;
 }
@@ -31,6 +38,16 @@ export interface AssignmentManagementRulesDocument extends Document {
   updatedAt: Date;
 }
 
+const PartnerAddedBySchema = new Schema(
+  {
+    userId: { type: String, required: true },
+    name: { type: String, required: true },
+    role: { type: String, required: true },
+    isSuperAdmin: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const PreferredPartnerSchema = new Schema<PreferredAssignmentPartner>(
   {
     profileId: { type: String, required: true },
@@ -39,6 +56,8 @@ const PreferredPartnerSchema = new Schema<PreferredAssignmentPartner>(
     phone: { type: String },
     categories: { type: [String], default: [] },
     areas: { type: [String], default: [] },
+    isAadhaarVerified: { type: Boolean },
+    addedBy: { type: PartnerAddedBySchema },
     priority: { type: Number, default: 0 },
     active: { type: Boolean, default: true },
   },

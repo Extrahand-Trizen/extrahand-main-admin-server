@@ -5,7 +5,6 @@ import { createAuditLog } from '../middleware/audit';
 import { Resource } from '../types/permissions';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
 import { TaskDeleteRequest } from '../models/TaskDeleteRequest';
-import { TaskCallRecord } from '../models/TaskCallRecord';
 import { AdminNotification } from '../models/AdminNotification';
 import { AdminUser } from '../models/AdminUser';
 import { DashboardType } from '../types/dashboard';
@@ -34,6 +33,7 @@ import {
 import { TaskPostedEmailAttempt } from '../models/TaskPostedEmailAttempt';
 import { Task } from '../models/Task';
 import { Profile } from '../models/Profile';
+import { CouponRedemption } from '../models/CouponRedemption';
 import mongoose from 'mongoose';
 
 const TASKS_CACHE_TTL_MS = 30_000; // 30 seconds
@@ -152,35 +152,63 @@ function isTaskOverdue(task: any, now: Date): boolean {
   return scheduledStart !== null && scheduledStart <= now;
 }
 
-async function enrichTasksWithTaskCallStatus(tasks: any[]): Promise<any[]> {
-  const taskIds = Array.from(
-    new Set(
-      tasks
-        .map((task) => String(task?.taskId || '').trim())
-        .filter(Boolean),
-    ),
-  );
-
-  if (taskIds.length === 0) return tasks;
-
-  const records = await TaskCallRecord.find({ taskId: { $in: taskIds } })
-    .select('taskId status followUpDate updatedAt')
-    .lean();
-  const recordMap = new Map(records.map((record) => [record.taskId, record]));
-
-  return tasks.map((task) => {
-    const record = recordMap.get(String(task.taskId));
-    return {
-      ...task,
-      taskCallStatus: record?.status || 'not_updated',
-      taskCallFollowUpDate: record?.followUpDate || null,
-      taskCallUpdatedAt: record?.updatedAt || null,
-    };
-  });
-}
-
 function extractTaskId(task: any): string {
   return normalizeTaskIdForAssignment(task?.taskId ?? task?._id ?? task?.id);
+}
+
+type RedeemedCouponDetails = {
+  couponCode: string;
+  discountAmount: number | null;
+  flowType: string | null;
+  redemptionScope: string | null;
+  bookingOrderId: string | null;
+  redeemedAt: Date | null;
+};
+
+async function loadRedeemedCouponMap(taskIds: string[]): Promise<Map<string, RedeemedCouponDetails>> {
+  const uniqueTaskIds = Array.from(new Set(taskIds.map((id) => String(id).trim()).filter(Boolean)));
+  if (uniqueTaskIds.length === 0) return new Map();
+
+  const redemptions = await CouponRedemption.find({
+    taskId: { $in: uniqueTaskIds },
+    status: 'REDEEMED',
+  })
+    .select('taskId couponCode discountAmount flowType redemptionScope bookingOrderId redeemedAt createdAt')
+    .sort({ redeemedAt: -1, createdAt: -1 })
+    .lean();
+
+  const couponMap = new Map<string, RedeemedCouponDetails>();
+  for (const redemption of redemptions) {
+    const taskId = String(redemption.taskId || '').trim().toLowerCase();
+    const couponCode = String(redemption.couponCode || '').trim();
+    if (taskId && couponCode && !couponMap.has(taskId)) {
+      couponMap.set(taskId, {
+        couponCode,
+        discountAmount: typeof redemption.discountAmount === 'number' &&
+          Number.isFinite(redemption.discountAmount)
+          ? redemption.discountAmount
+          : null,
+        flowType: redemption.flowType || null,
+        redemptionScope: redemption.redemptionScope || null,
+        bookingOrderId: redemption.bookingOrderId || null,
+        redeemedAt: redemption.redeemedAt || null,
+      });
+    }
+  }
+  return couponMap;
+}
+
+async function enrichTasksWithRedeemedCoupon(tasks: any[]): Promise<any[]> {
+  const couponMap = await loadRedeemedCouponMap(tasks.map(extractTaskId));
+  return tasks.map((task) => {
+    const couponRedemption = couponMap.get(extractTaskId(task).toLowerCase()) || null;
+    return {
+      ...task,
+      couponCode: couponRedemption?.couponCode || task.couponCode || null,
+      couponDiscount: couponRedemption?.discountAmount ?? task.couponDiscount ?? null,
+      couponRedemption,
+    };
+  });
 }
 
 async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
@@ -226,12 +254,12 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
               });
             }
           }
-          const emailSent = await sendTaskPostedEmail({
+          const emailResult = await sendTaskPostedEmail({
             taskId,
             taskTitle: task.title,
             userName: customerName || task.userName || task.customerName || task.requesterName,
           });
-          if (emailSent) {
+          if (emailResult.sentRecipients.length > 0) {
             await AdminNotification.updateOne(
               { _id: existingNotification._id },
               { $set: { 'metadata.taskPostedEmailSentAt': new Date() } },
@@ -403,7 +431,7 @@ async function fetchTasksForLocalFiltering(params: Record<string, any>): Promise
     page += 1;
   } while (page <= totalPages && tasks.length < maxTasks);
 
-  return tasks.slice(0, maxTasks);
+  return enrichTasksWithRedeemedCoupon(tasks.slice(0, maxTasks));
 }
 
 function extractProposedAmount(application: any): number | undefined {
@@ -514,11 +542,8 @@ export class TaskManagementController {
         .filter((id) => /^[0-9a-fA-F]{24}$/.test(id))
         .map((id) => new mongoose.Types.ObjectId(id));
 
-      const [assignments, taskCalls, orders, profiles, settings] = await Promise.all([
+      const [assignments, orders, profiles, settings, redeemedCouponMap] = await Promise.all([
         TaskAssignment.find({ taskId: { $in: taskIds } }).lean(),
-        TaskCallRecord.find({ taskId: { $in: taskIds } })
-          .select('taskId status followUpDate updatedAt')
-          .lean(),
         orderIds.length > 0
           ? BookingOrder.find({ orderId: { $in: orderIds } })
               .select('orderId total totalAfterCoupon couponCode couponDiscount')
@@ -535,19 +560,13 @@ export class TaskManagementController {
               .lean()
           : Promise.resolve([]),
         getTaskPostedEmailSettings(),
+        loadRedeemedCouponMap(taskIds),
       ]);
 
       const assignmentMap = new Map<string, any>();
       for (const a of assignments) {
         if (a.taskId) {
           assignmentMap.set(String(a.taskId).toLowerCase(), a);
-        }
-      }
-
-      const callMap = new Map<string, any>();
-      for (const c of taskCalls) {
-        if (c.taskId) {
-          callMap.set(String(c.taskId), c);
         }
       }
 
@@ -575,7 +594,6 @@ export class TaskManagementController {
         const helperProfile = assigneeId ? profileMap.get(assigneeId) : null;
 
         const assignment = assignmentMap.get(taskId.toLowerCase());
-        const callRecord = callMap.get(taskId);
         const order = t.bookingOrderId ? orderMap.get(String(t.bookingOrderId)) : null;
 
         const customerPhone =
@@ -637,15 +655,14 @@ export class TaskManagementController {
                 email: assignment.assignedToEmail,
               }
             : null,
-          taskCallStatus: callRecord?.status || 'not_updated',
-          taskCallFollowUpDate: callRecord?.followUpDate || null,
-          taskCallUpdatedAt: callRecord?.updatedAt || null,
           isHourly,
           paymentAmount,
           isFreeCoupon,
           paymentType: isFreeCoupon ? 'free_coupon' : 'paid',
-          couponCode: order?.couponCode || null,
-          couponDiscount: order?.couponDiscount || null,
+          couponCode: redeemedCouponMap.get(taskId.toLowerCase())?.couponCode || order?.couponCode || null,
+          couponDiscount:
+            redeemedCouponMap.get(taskId.toLowerCase())?.discountAmount ?? order?.couponDiscount ?? null,
+          couponRedemption: redeemedCouponMap.get(taskId.toLowerCase()) || null,
           postedBy: isTeamPosted ? 'team' : 'customer',
           isTeamPosted,
         };
@@ -703,20 +720,313 @@ export class TaskManagementController {
     return buildTasksPromise;
   }
 
-  static async countCurrentlyOpenTasks(): Promise<number> {
+  static async countCurrentlyOpenTasks(city?: string): Promise<number> {
     const tasks = await TaskManagementController.getCompiledTasks();
     const now = new Date();
 
     return tasks.filter((task) => {
-      return task.status === 'open' && !isTaskOverdue(task, now);
+      return task.postedBy === 'customer'
+        && (!city || TaskManagementController.taskMatchesCity(task, city))
+        && task.status === 'open'
+        && !isTaskOverdue(task, now);
     }).length;
   }
 
-  static async countCurrentlyOverdueTasks(): Promise<number> {
+  static async countCustomerTasksByStatus(statuses: string[], city?: string): Promise<number> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const statusSet = new Set(statuses);
+
+    return tasks.filter((task) =>
+      task.postedBy === 'customer'
+      && (!city || TaskManagementController.taskMatchesCity(task, city))
+      && statusSet.has(task.status)
+    ).length;
+  }
+
+  static async countCustomerTasks(city?: string): Promise<number> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    return tasks.filter((task) =>
+      task.postedBy === 'customer'
+      && (!city || TaskManagementController.taskMatchesCity(task, city))
+    ).length;
+  }
+
+  private static taskMatchesCity(task: any, city: string): boolean {
+    const normalizedCity = city.trim().toLowerCase();
+    if (!normalizedCity || normalizedCity === 'all') return true;
+    const values = [
+      task.location?.city,
+      task.location?.addressDetails?.city,
+      task.city,
+    ];
+    return values.some((value) =>
+      typeof value === 'string' && value.trim().toLowerCase() === normalizedCity
+    );
+  }
+
+  static async getCustomerTaskCategoryBreakdown(
+    range: '7d' | '30d' | '90d',
+    city?: string,
+  ): Promise<{
+    range: string;
+    categories: Array<{
+      category: string;
+      count: number;
+      subcategories: Array<{ subcategory: string; count: number }>;
+    }>;
+    generatedAt: string;
+  }> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeStart = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const subcategoryMap = new Map<string, Map<string, number>>();
+    const categoryCounts = new Map<string, number>();
+
+    for (const task of tasks) {
+      if (task.postedBy !== 'customer') continue;
+      if (city && !TaskManagementController.taskMatchesCity(task, city)) continue;
+      const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      if (!Number.isFinite(createdAt) || createdAt < rangeStart) continue;
+
+      const category = String(
+        task.categorySlug || task.categoryLabel || task.category || 'other',
+      ).trim() || 'other';
+      categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+
+      const subcategory = String(task.subcategory || 'unspecified').trim() || 'unspecified';
+      const subcategoryCounts = subcategoryMap.get(category) || new Map<string, number>();
+      subcategoryCounts.set(subcategory, (subcategoryCounts.get(subcategory) || 0) + 1);
+      subcategoryMap.set(category, subcategoryCounts);
+    }
+
+    const categories = Array.from(categoryCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, count]) => ({
+        category,
+        count,
+        subcategories: Array.from((subcategoryMap.get(category) || new Map()).entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([subcategory, subcategoryCount]) => ({
+            subcategory,
+            count: subcategoryCount,
+          })),
+      }));
+
+    return { range, categories, generatedAt: new Date().toISOString() };
+  }
+
+  static async getCustomerTaskCategoryPerformance(
+    range: '7d' | '30d' | '90d',
+    city?: string,
+  ): Promise<{
+    range: string;
+    totals: {
+      posted: number;
+      open: number;
+      active: number;
+      completed: number;
+      cancelled: number;
+      completionRate: number;
+      cancellationRate: number;
+    };
+    categories: Array<{
+      category: string;
+      posted: number;
+      open: number;
+      active: number;
+      completed: number;
+      cancelled: number;
+      completionRate: number;
+      cancellationRate: number;
+      fulfillmentRate: number;
+    }>;
+    generatedAt: string;
+  }> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeStart = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const activeStatuses = new Set(['assigned', 'started', 'in_progress', 'review']);
+    const categoryMap = new Map<string, {
+      posted: number;
+      open: number;
+      active: number;
+      completed: number;
+      cancelled: number;
+    }>();
+
+    for (const task of tasks) {
+      if (task.postedBy !== 'customer') continue;
+      if (city && !TaskManagementController.taskMatchesCity(task, city)) continue;
+      const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      if (!Number.isFinite(createdAt) || createdAt < rangeStart) continue;
+
+      const category = String(
+        task.categorySlug || task.categoryLabel || task.category || 'other',
+      ).trim() || 'other';
+      const counts = categoryMap.get(category) || { posted: 0, open: 0, active: 0, completed: 0, cancelled: 0 };
+      counts.posted += 1;
+      if (task.status === 'open') counts.open += 1;
+      if (activeStatuses.has(task.status)) counts.active += 1;
+      if (task.status === 'completed') counts.completed += 1;
+      if (task.status === 'cancelled') counts.cancelled += 1;
+      categoryMap.set(category, counts);
+    }
+
+    const categories = Array.from(categoryMap.entries())
+      .sort((a, b) => b[1].posted - a[1].posted)
+      .map(([category, counts]) => {
+        const completionRate = counts.posted > 0
+          ? Number(((counts.completed / counts.posted) * 100).toFixed(1))
+          : 0;
+        const cancellationRate = counts.posted > 0
+          ? Number(((counts.cancelled / counts.posted) * 100).toFixed(1))
+          : 0;
+        const fulfillmentRate = counts.posted > 0
+          ? Number((((counts.active + counts.completed) / counts.posted) * 100).toFixed(1))
+          : 0;
+        return { category, ...counts, completionRate, cancellationRate, fulfillmentRate };
+      });
+
+    const totals = categories.reduce(
+      (acc, row) => {
+        acc.posted += row.posted;
+        acc.open += row.open;
+        acc.active += row.active;
+        acc.completed += row.completed;
+        acc.cancelled += row.cancelled;
+        return acc;
+      },
+      { posted: 0, open: 0, active: 0, completed: 0, cancelled: 0 },
+    );
+
+    return {
+      range,
+      totals: {
+        ...totals,
+        completionRate: totals.posted > 0
+          ? Number(((totals.completed / totals.posted) * 100).toFixed(1))
+          : 0,
+        cancellationRate: totals.posted > 0
+          ? Number(((totals.cancelled / totals.posted) * 100).toFixed(1))
+          : 0,
+      },
+      categories,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  static async getCustomerTaskCancellationAnalytics(
+    range: '7d' | '30d' | '90d',
+    city?: string,
+  ): Promise<{
+    range: string;
+    totals: {
+      totalTasks: number;
+      cancelledTasks: number;
+      cancellationRate: number;
+      cancelledBeforeAssignment: number;
+      cancelledAfterAssignment: number;
+    };
+    trend: Array<{
+      date: string;
+      totalTasks: number;
+      cancelledTasks: number;
+      cancellationRate: number;
+    }>;
+    categories: Array<{
+      category: string;
+      totalTasks: number;
+      cancelledTasks: number;
+      cancellationRate: number;
+    }>;
+    generatedAt: string;
+  }> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeStart = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const categoryMap = new Map<string, { totalTasks: number; cancelledTasks: number }>();
+    const trendMap = new Map<string, { totalTasks: number; cancelledTasks: number }>();
+    let totalTasks = 0;
+    let cancelledTasks = 0;
+    let cancelledBeforeAssignment = 0;
+    let cancelledAfterAssignment = 0;
+
+    for (const task of tasks) {
+      if (task.postedBy !== 'customer') continue;
+      if (city && !TaskManagementController.taskMatchesCity(task, city)) continue;
+      const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      if (!Number.isFinite(createdAt) || createdAt < rangeStart) continue;
+
+      const category = String(
+        task.categorySlug || task.categoryLabel || task.category || 'other',
+      ).trim() || 'other';
+      const categoryCounts = categoryMap.get(category) || { totalTasks: 0, cancelledTasks: 0 };
+      categoryCounts.totalTasks += 1;
+      totalTasks += 1;
+
+      const date = new Date(createdAt).toISOString().slice(0, 10);
+      const trendCounts = trendMap.get(date) || { totalTasks: 0, cancelledTasks: 0 };
+      trendCounts.totalTasks += 1;
+
+      if (task.status === 'cancelled') {
+        cancelledTasks += 1;
+        categoryCounts.cancelledTasks += 1;
+        trendCounts.cancelledTasks += 1;
+        if (task.assigneeId) cancelledAfterAssignment += 1;
+        else cancelledBeforeAssignment += 1;
+      }
+
+      categoryMap.set(category, categoryCounts);
+      trendMap.set(date, trendCounts);
+    }
+
+    const categories = Array.from(categoryMap.entries())
+      .sort((a, b) => b[1].totalTasks - a[1].totalTasks)
+      .map(([category, counts]) => ({
+        category,
+        ...counts,
+        cancellationRate: counts.totalTasks > 0
+          ? Number(((counts.cancelledTasks / counts.totalTasks) * 100).toFixed(1))
+          : 0,
+      }));
+
+    const trend = Array.from(trendMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, counts]) => ({
+        date,
+        ...counts,
+        cancellationRate: counts.totalTasks > 0
+          ? Number(((counts.cancelledTasks / counts.totalTasks) * 100).toFixed(1))
+          : 0,
+      }));
+
+    return {
+      range,
+      totals: {
+        totalTasks,
+        cancelledTasks,
+        cancellationRate: totalTasks > 0
+          ? Number(((cancelledTasks / totalTasks) * 100).toFixed(1))
+          : 0,
+        cancelledBeforeAssignment,
+        cancelledAfterAssignment,
+      },
+      trend,
+      categories,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  static async countCurrentlyOverdueTasks(city?: string): Promise<number> {
     const tasks = await TaskManagementController.getCompiledTasks();
     const now = new Date();
 
-    return tasks.filter((task) => isTaskOverdue(task, now)).length;
+    return tasks.filter((task) =>
+      task.postedBy === 'customer'
+      && (!city || TaskManagementController.taskMatchesCity(task, city))
+      && isTaskOverdue(task, now)
+    ).length;
   }
 
   /**
@@ -746,7 +1056,6 @@ export class TaskManagementController {
       const customerFilters = customerFilter
         ? customerFilter.split(',').map((id) => id.trim()).filter(Boolean)
         : [];
-      const followUpStatus = String(req.query.followUpStatus || '').trim();
       const assignedToParam = String(req.query.assignedTo || '').trim();
       const postedByParam = String(req.query.postedBy || defaultPostedBy || '')
         .trim()
@@ -857,26 +1166,21 @@ export class TaskManagementController {
         );
       }
 
-      // 7. Follow-up status
-      if (followUpStatus && followUpStatus !== 'all') {
-        filtered = filtered.filter((t) => t.taskCallStatus === followUpStatus);
-      }
-
-      // 8. Assigned Ops Admin
+      // 7. Assigned Ops Admin
       if (assigneeFilter) {
         filtered = filtered.filter((t) =>
           taskMatchesAssigneeFilter(t.assignedTo, assigneeFilter, assigneeFilterUserId),
         );
       }
 
-      // 9. Posted by (team vs customer)
+      // 8. Posted by (team vs customer)
       if (postedByParam === 'team') {
         filtered = filtered.filter((t) => t.postedBy === 'team');
       } else if (postedByParam === 'customer') {
         filtered = filtered.filter((t) => t.postedBy === 'customer');
       }
 
-      // 10. Payment type
+      // 9. Payment type
       if (paymentType && paymentType !== 'all') {
         if (paymentType === 'free_coupon') {
           filtered = filtered.filter((t) => t.isFreeCoupon === true);
@@ -885,7 +1189,7 @@ export class TaskManagementController {
         }
       }
 
-      // 11. Scheduled Date Range
+      // 10. Scheduled Date Range
       if (scheduledDateFrom || scheduledDateTo) {
         const fromDate = scheduledDateFrom
           ? new Date(`${scheduledDateFrom}T00:00:00.000+05:30`)
@@ -905,7 +1209,7 @@ export class TaskManagementController {
         });
       }
 
-      // 12. Work creation date range
+      // 11. Work creation date range
       if (createdFrom || createdTo) {
         const fromDate = createdFrom ? new Date(createdFrom) : null;
         const toDate = createdTo ? new Date(createdTo) : null;
@@ -929,7 +1233,7 @@ export class TaskManagementController {
         });
       }
 
-      // 13. Sorting
+      // 12. Sorting
       const isAsc = sortOrder === 'asc';
       filtered = [...filtered].sort((a, b) => {
         if (sortBy === 'scheduledDate') {
@@ -957,7 +1261,7 @@ export class TaskManagementController {
         return isAsc ? crA - crB : crB - crA;
       });
 
-      // 14. Pagination
+      // 13. Pagination
       const total = filtered.length;
       const pages = Math.max(1, Math.ceil(total / limit));
       const start = (page - 1) * limit;
@@ -1031,16 +1335,22 @@ export class TaskManagementController {
       const requesterId = normalizeTaskIdForAssignment(
         normalizedTask.CustomerId || normalizedTask.customerId || normalizedTask.requesterId,
       );
+      const bookingOrderId = String(normalizedTask.bookingOrderId || '').trim();
 
       // Run task, assignment, and poster metadata enrichment in parallel.
       // Previously they ran sequentially which caused 10+ second load times because each
       // awaited the previous (DB query → admin-service DB query → user-service HTTP call).
-      const [withCallStatus, withAssignedTo, withAssigneeName, customerProfileBatch, emailSettings] = await Promise.all([
-        enrichTasksWithTaskCallStatus([normalizedTask]),
+      const [withAssignedTo, withAssigneeName, customerProfileBatch, emailSettings, couponEnrichedTasks, bookingOrder] = await Promise.all([
         enrichTasksWithAssignedTo([normalizedTask]),
         enrichTasksWithAssigneeName([normalizedTask]),
         requesterId ? userServiceClient.getProfilesBatch([requesterId]) : Promise.resolve(null),
         getTaskPostedEmailSettings(),
+        enrichTasksWithRedeemedCoupon([normalizedTask]),
+        bookingOrderId
+          ? BookingOrder.findOne({ orderId: bookingOrderId })
+              .select('couponCode couponDiscount')
+              .lean()
+          : Promise.resolve(null),
       ]);
       const customerProfile = Array.isArray(customerProfileBatch?.profiles)
         ? customerProfileBatch.profiles[0]
@@ -1059,6 +1369,7 @@ export class TaskManagementController {
       // Merge only the fields each enrichment adds, keeping normalizedTask as the base
       // so that assignment fields (assigneeId, assigneeName, etc.) are never overwritten
       // by a stale enrichment result.
+      const couponRedemption = couponEnrichedTasks[0]?.couponRedemption || null;
       const enrichedTask = {
         ...normalizedTask,
         customerId: requesterId || normalizedTask.customerId,
@@ -1067,12 +1378,20 @@ export class TaskManagementController {
           customerProfile?.fullName ||
           [customerProfile?.firstName, customerProfile?.lastName].filter(Boolean).join(' ') ||
           normalizedTask.customerName,
+        couponCode:
+          couponRedemption?.couponCode ||
+          bookingOrder?.couponCode ||
+          couponEnrichedTasks[0]?.couponCode ||
+          normalizedTask.couponCode ||
+          null,
+        couponDiscount:
+          couponRedemption?.discountAmount ??
+          bookingOrder?.couponDiscount ??
+          couponEnrichedTasks[0]?.couponDiscount ??
+          null,
+        couponRedemption,
         postedBy: isTeamPosted ? 'team' : 'customer',
         isTeamPosted,
-        // from enrichTasksWithTaskCallStatus
-        taskCallStatus: withCallStatus[0]?.taskCallStatus,
-        taskCallFollowUpDate: withCallStatus[0]?.taskCallFollowUpDate,
-        taskCallUpdatedAt: withCallStatus[0]?.taskCallUpdatedAt,
         // from enrichTasksWithAssignedTo (CRM admin assignment, not helper)
         assignedTo: withAssignedTo[0]?.assignedTo,
         // from enrichTasksWithAssigneeName (resolved display name for helper)
@@ -1135,14 +1454,22 @@ export class TaskManagementController {
         return;
       }
 
-      const sent = await sendTaskPostedEmail({
+      const emailResult = await sendTaskPostedEmail({
         taskId,
         taskTitle: task?.title,
         userName: profile?.name || profile?.fullName,
         userPhone: profile?.phone,
       });
 
-      res.json({ success: sent, sent, skipped: !sent });
+      const sent = emailResult.sentRecipients.length > 0;
+      res.json({
+        success: sent,
+        sent,
+        partial: emailResult.status === 'partial',
+        skipped: emailResult.status === 'skipped',
+        failedRecipients: emailResult.failedRecipients,
+        error: emailResult.error,
+      });
     } catch (error: any) {
       logger.error('Manual task-posted email error', {
         taskId: req.params.taskId,

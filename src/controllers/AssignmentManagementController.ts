@@ -9,25 +9,52 @@ function normalizePhone(phone: string): string {
   return String(phone || '').replace(/\D/g, '');
 }
 
-function normalizeRules(document: any) {
+function normalizePreferredPartners(partners: any[], includeAttribution: boolean): any[] {
+  return [...partners]
+    .map((partner) => {
+      const normalized = typeof partner?.toObject === 'function' ? partner.toObject() : { ...partner };
+      if (!includeAttribution) delete normalized.addedBy;
+      return normalized;
+    })
+    .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
+}
+
+function normalizeAreaRule(rule: any, includeAttribution = false) {
   return {
-    preferredPartners: [...(document?.preferredPartners || [])].sort(
-      (left, right) => Number(left.priority || 0) - Number(right.priority || 0),
+    area: String(rule.area || rule._doc?.area || ''),
+    category: rule.category || rule._doc?.category || undefined,
+    zone: String(rule.zone || rule._doc?.zone || 'Custom Zone'),
+    workTypes: Array.isArray(rule.workTypes || rule._doc?.workTypes)
+      ? (rule.workTypes || rule._doc?.workTypes).map(String)
+      : ['hourly'],
+    active: rule.active !== false && rule._doc?.active !== false,
+    preferredPartners: normalizePreferredPartners(
+      rule.preferredPartners || rule._doc?.preferredPartners || [],
+      includeAttribution,
     ),
-    areaRules: (document?.areaRules || []).map((rule: any) => ({
-      area: String(rule.area || rule._doc?.area || ''),
-      category: rule.category || rule._doc?.category || undefined,
-      zone: String(rule.zone || rule._doc?.zone || 'Custom Zone'),
-      workTypes: Array.isArray(rule.workTypes || rule._doc?.workTypes)
-        ? (rule.workTypes || rule._doc?.workTypes).map(String)
-        : ['hourly'],
-      active: rule.active !== false && rule._doc?.active !== false,
-      preferredPartners: [...(rule.preferredPartners || rule._doc?.preferredPartners || [])].sort(
-        (left, right) => Number(left.priority || 0) - Number(right.priority || 0),
-      ),
-    })),
+  };
+}
+
+function normalizeRules(document: any, includeAttribution = false) {
+  return {
+    preferredPartners: normalizePreferredPartners(document?.preferredPartners || [], includeAttribution),
+    areaRules: (document?.areaRules || []).map((rule: any) =>
+      normalizeAreaRule(rule, includeAttribution),
+    ),
     excludedPhones: (document?.excludedPhones || []).map(normalizePhone).filter(Boolean),
   };
+}
+
+function getAdminAttribution(req: Request) {
+  const admin = req.admin;
+  return admin
+    ? {
+        userId: admin.userId,
+        name: admin.name,
+        role: admin.role,
+        isSuperAdmin: admin.isSuperAdmin,
+      }
+    : undefined;
 }
 
 async function getRulesDocument() {
@@ -39,10 +66,10 @@ async function getRulesDocument() {
 }
 
 export class AssignmentManagementController {
-  static async getRules(_req: Request, res: Response): Promise<void> {
+  static async getRules(req: Request, res: Response): Promise<void> {
     try {
-      const rules = await getRulesDocument();
-      res.json({ success: true, data: normalizeRules(rules) });
+      const rules = await AssignmentManagementRules.findOne({ key: 'assignment_management' });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Get assignment management rules error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to load assignment rules' });
@@ -139,12 +166,14 @@ export class AssignmentManagementController {
         phone: phone ? normalizePhone(phone) : undefined,
         categories: Array.isArray(categories) ? categories.map(String) : [],
         areas: Array.isArray(areas) ? areas.map(String) : [],
+        isAadhaarVerified: true,
+        addedBy: getAdminAttribution(req),
         priority,
         active: true,
       });
       rules.updatedBy = (req as any).admin?.userId;
       await rules.save();
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Add preferred partner error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to add preferred partner' });
@@ -158,7 +187,7 @@ export class AssignmentManagementController {
         .filter((partner) => partner.profileId !== String(req.params.profileId))
         .map((partner, index) => ({ ...partner, priority: index })) as any;
       await rules.save();
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Remove preferred partner error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to remove preferred partner' });
@@ -172,14 +201,14 @@ export class AssignmentManagementController {
       const currentIndex = rules.preferredPartners.findIndex((partner) => partner.profileId === String(profileId));
       const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
       if (currentIndex < 0 || targetIndex < 0 || targetIndex >= rules.preferredPartners.length) {
-        res.json({ success: true, data: normalizeRules(rules) });
+        res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
         return;
       }
       const [partner] = rules.preferredPartners.splice(currentIndex, 1);
       rules.preferredPartners.splice(targetIndex, 0, partner);
       rules.preferredPartners.forEach((item, index) => { item.priority = index; });
       await rules.save();
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Reorder preferred partners error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to reorder preferred partners' });
@@ -198,7 +227,7 @@ export class AssignmentManagementController {
         rules.excludedPhones.push(phone);
         await rules.save();
       }
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Add excluded phone error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to add excluded phone' });
@@ -207,20 +236,21 @@ export class AssignmentManagementController {
 
   static async saveAreaRule(req: Request, res: Response): Promise<void> {
     try {
+      const requestStartedAt = Date.now();
       const { area, category, zone = 'Custom Zone', workTypes = ['hourly'], preferredPartners = [] } = req.body;
       if (!String(area || '').trim()) {
         res.status(400).json({ success: false, error: 'Area is required' });
         return;
       }
+      const requestedPartners = Array.isArray(preferredPartners) ? preferredPartners : [];
+      if (requestedPartners.some((partner: any) => !partner?.profileId || !partner?.uid || !partner?.name)) {
+        res.status(400).json({ success: false, error: 'Each preferred partner must include profileId, uid and name' });
+        return;
+      }
+      const dbReadStartedAt = Date.now();
       const rules = await getRulesDocument();
+      const dbReadDuration = Date.now() - dbReadStartedAt;
       const normalizedArea = String(area).trim();
-      const partners = (Array.isArray(preferredPartners) ? preferredPartners : []).map((partner: any, index: number) => ({
-        profileId: String(partner.profileId), uid: String(partner.uid), name: String(partner.name),
-        phone: partner.phone ? normalizePhone(partner.phone) : undefined,
-        categories: Array.isArray(partner.categories) ? partner.categories.map(String) : [],
-        areas: Array.isArray(partner.areas) ? partner.areas.map(String) : [],
-        priority: index, active: partner.active !== false,
-      }));
       const normalizedCategory = category ? String(category).trim().toLowerCase() : '';
       const normalizedWorkTypes = Array.isArray(workTypes) && workTypes.length
         ? workTypes.map(String)
@@ -230,6 +260,25 @@ export class AssignmentManagementController {
         String(rule.category || '').trim().toLowerCase() === normalizedCategory &&
         (rule.workTypes || []).some((workType) => normalizedWorkTypes.includes(String(workType))),
       );
+      const existingRule = existingIndex >= 0 ? rules.areaRules[existingIndex] : undefined;
+      const adminAttribution = getAdminAttribution(req);
+      const partners = requestedPartners.map((partner: any, index: number) => {
+        const existingPartner = existingRule?.preferredPartners.find(
+          (item) => item.profileId === String(partner.profileId),
+        );
+        return {
+          profileId: String(partner.profileId),
+          uid: String(partner.uid),
+          name: String(partner.name),
+          phone: partner.phone ? normalizePhone(partner.phone) : undefined,
+          categories: Array.isArray(partner.categories) ? partner.categories.map(String) : [],
+          areas: Array.isArray(partner.areas) ? partner.areas.map(String) : [],
+          isAadhaarVerified: true,
+          addedBy: existingPartner ? existingPartner.addedBy : adminAttribution,
+          priority: index,
+          active: partner.active !== false,
+        };
+      });
       const nextRule = {
         area: normalizedArea,
         category: category ? String(category).trim() : undefined,
@@ -252,8 +301,25 @@ export class AssignmentManagementController {
       } else {
         rules.areaRules.push(nextRule as any);
       }
+      const dbWriteStartedAt = Date.now();
       await rules.save();
-      res.json({ success: true, data: normalizeRules(rules) });
+      const dbWriteDuration = Date.now() - dbWriteStartedAt;
+      const savedRule = rules.areaRules.find((rule: any) =>
+        rule.area.trim().toLowerCase() === normalizedArea.toLowerCase() &&
+        String(rule.category || '').trim().toLowerCase() === normalizedCategory &&
+        normalizedWorkTypes.every((workType: string) => (rule.workTypes || []).includes(workType)),
+      );
+      if (!savedRule) {
+        throw new Error('Saved area rule could not be found in the updated rules document');
+      }
+      res.append(
+        'Server-Timing',
+        `db-read;dur=${dbReadDuration}, db-write;dur=${dbWriteDuration}, total;dur=${Date.now() - requestStartedAt}`,
+      );
+      res.json({
+        success: true,
+        data: { areaRule: normalizeAreaRule(savedRule, Boolean(req.admin?.isSuperAdmin)) },
+      });
     } catch (error: any) {
       logger.error('Save area rule error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to save area rule' });
@@ -265,7 +331,7 @@ export class AssignmentManagementController {
       const rules = await getRulesDocument();
       rules.areaRules = rules.areaRules.filter((rule) => rule.area !== decodeURIComponent(req.params.area));
       await rules.save();
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Remove area rule error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to remove area rule' });
@@ -289,7 +355,7 @@ export class AssignmentManagementController {
         rule.preferredPartners.forEach((item, index) => { item.priority = index; });
         await rules.save();
       }
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Reorder area rule partners error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to reorder area partners' });
@@ -302,7 +368,7 @@ export class AssignmentManagementController {
       const rules = await getRulesDocument();
       rules.excludedPhones = rules.excludedPhones.filter((item) => normalizePhone(item) !== phone);
       await rules.save();
-      res.json({ success: true, data: normalizeRules(rules) });
+      res.json({ success: true, data: normalizeRules(rules, Boolean(req.admin?.isSuperAdmin)) });
     } catch (error: any) {
       logger.error('Remove excluded phone error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to remove excluded phone' });

@@ -4,13 +4,11 @@ import { taskServiceClient } from '../services/TaskServiceClient';
 import { TaskManagementController } from './TaskManagementController';
 import logger from '../config/logger';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
+import { getLocationCatalog } from '../models/LocationCatalog';
 import {
   AnalyticsRange,
   CustomerAnalyticsDto,
   CustomerVerificationComparisonDto,
-  TaskCancellationAnalyticsDto,
-  TaskCategoryBreakdownDto,
-  TaskCategoryPerformanceDto,
   UserAnalyticsDto,
 } from '../contracts/analytics';
 
@@ -64,22 +62,8 @@ export class AnalyticsController {
   static async getTaskCategoryPerformance(req: Request, res: Response): Promise<void> {
     try {
       const range = getRange(req.query.range as string | undefined);
-      const response = await taskServiceClient.getTaskCategoryPerformance(range);
-      const payload = response?.data || {};
-      const data: TaskCategoryPerformanceDto = {
-        range,
-        totals: {
-          posted: Number(payload?.totals?.posted || 0),
-          open: Number(payload?.totals?.open || 0),
-          active: Number(payload?.totals?.active || 0),
-          completed: Number(payload?.totals?.completed || 0),
-          cancelled: Number(payload?.totals?.cancelled || 0),
-          completionRate: Number(payload?.totals?.completionRate || 0),
-          cancellationRate: Number(payload?.totals?.cancellationRate || 0),
-        },
-        categories: Array.isArray(payload?.categories) ? payload.categories : [],
-        generatedAt: payload?.generatedAt || new Date().toISOString(),
-      };
+      const city = typeof req.query.city === 'string' ? req.query.city : undefined;
+      const data = await TaskManagementController.getCustomerTaskCategoryPerformance(range, city);
       res.json({ success: true, data });
     } catch (error: any) {
       logger.error('Get task category performance error:', error);
@@ -93,21 +77,8 @@ export class AnalyticsController {
   static async getTaskCancellationAnalytics(req: Request, res: Response): Promise<void> {
     try {
       const range = getRange(req.query.range as string | undefined);
-      const response = await taskServiceClient.getTaskCancellationAnalytics(range);
-      const payload = response?.data || {};
-      const data: TaskCancellationAnalyticsDto = {
-        range,
-        totals: {
-          totalTasks: Number(payload?.totals?.totalTasks || 0),
-          cancelledTasks: Number(payload?.totals?.cancelledTasks || 0),
-          cancellationRate: Number(payload?.totals?.cancellationRate || 0),
-          cancelledBeforeAssignment: Number(payload?.totals?.cancelledBeforeAssignment || 0),
-          cancelledAfterAssignment: Number(payload?.totals?.cancelledAfterAssignment || 0),
-        },
-        trend: Array.isArray(payload?.trend) ? payload.trend : [],
-        categories: Array.isArray(payload?.categories) ? payload.categories : [],
-        generatedAt: payload?.generatedAt || new Date().toISOString(),
-      };
+      const city = typeof req.query.city === 'string' ? req.query.city : undefined;
+      const data = await TaskManagementController.getCustomerTaskCancellationAnalytics(range, city);
       res.json({ success: true, data });
     } catch (error: any) {
       logger.error('Get task cancellation analytics error:', error);
@@ -121,12 +92,8 @@ export class AnalyticsController {
   static async getTaskCategoryBreakdown(req: Request, res: Response): Promise<void> {
     try {
       const range = getRange(req.query.range as string | undefined);
-      const response = await taskServiceClient.getTaskCategoryBreakdown(range);
-      const data: TaskCategoryBreakdownDto = {
-        range,
-        categories: Array.isArray(response?.data?.categories) ? response.data.categories : [],
-        generatedAt: response?.data?.generatedAt || new Date().toISOString(),
-      };
+      const city = typeof req.query.city === 'string' ? req.query.city : undefined;
+      const data = await TaskManagementController.getCustomerTaskCategoryBreakdown(range, city);
       res.json({ success: true, data });
     } catch (error: any) {
       logger.error('Get task category breakdown error:', error);
@@ -143,64 +110,117 @@ export class AnalyticsController {
    */
   static async getOverview(req: Request, res: Response): Promise<void> {
     try {
+      const cityParam = typeof req.query.city === 'string' ? req.query.city.trim() : '';
+      const city = cityParam && cityParam.toLowerCase() !== 'all' ? cityParam : undefined;
       const results = await Promise.allSettled([
-        userServiceClient.getRoleCounts(),
+        userServiceClient.listUsers({
+          role: 'customer',
+          city,
+          page: 1,
+          limit: 1,
+        }),
         userServiceClient.listUsers({
           role: 'partner',
           isAadhaarVerified: true,
+          city,
+          page: 1,
+          limit: 1,
+        }),
+        userServiceClient.listUsers({
+          role: 'partner',
+          city,
           page: 1,
           limit: 1,
         }),
         userServiceClient.getHelperCategoryCounts(),
-        taskServiceClient.listTasks({ page: 1, limit: 1 }),
-        TaskManagementController.countCurrentlyOpenTasks(),
-        TaskManagementController.countCurrentlyOverdueTasks(),
-        taskServiceClient.listTasks({
-          page: 1,
-          limit: 1,
-          status: 'assigned,started,in_progress,review',
-        }),
-        taskServiceClient.listTasks({ page: 1, limit: 1, status: 'completed' }),
+        TaskManagementController.countCustomerTasks(city),
+        TaskManagementController.countCurrentlyOpenTasks(city),
+        TaskManagementController.countCurrentlyOverdueTasks(city),
+        TaskManagementController.countCustomerTasksByStatus(['cancelled'], city),
+        TaskManagementController.countCustomerTasksByStatus(['completed'], city),
       ]);
 
-      const userCountsRaw =
-        results[0].status === 'fulfilled'
-          ? results[0].value?.data || { customers: 0, helpers: 0, totalProfiles: 0 }
-          : { customers: 0, helpers: 0, totalProfiles: 0 };
-      const userCounts = {
-        Customers: userCountsRaw.customers || userCountsRaw.posters || 0,
-        Helpers: userCountsRaw.helpers || userCountsRaw.taskers || 0,
-        totalPlatformUsers: Number(userCountsRaw.totalProfiles || 0),
-      };
+      const customerResult = results[0].status === 'fulfilled' ? results[0].value : {};
+      const customerCount = extractTotal(customerResult);
 
       const partnerAadhaarResult =
         results[1].status === 'fulfilled' ? results[1].value : {};
       const partnerAadhaarVerified = extractTotal(partnerAadhaarResult);
+      const partnerResult =
+        results[2].status === 'fulfilled' ? results[2].value : {};
+      const allRegisteredPartners = extractTotal(partnerResult);
       const helperCategoryCounts =
-        results[2].status === 'fulfilled'
-          ? Array.isArray(results[2].value?.data?.categories)
-            ? results[2].value.data.categories
+        results[3].status === 'fulfilled'
+          ? Array.isArray(results[3].value?.data?.categories)
+            ? results[3].value.data.categories
             : []
           : [];
       const helperCategorySummary =
-        results[2].status === 'fulfilled' ? results[2].value?.data?.summary || {} : {};
-      const totalTaskResult = results[3].status === 'fulfilled' ? results[3].value : {};
-      const openTaskCount = results[4].status === 'fulfilled' ? results[4].value : 0;
-      const overdueTaskCount = results[5].status === 'fulfilled' ? results[5].value : 0;
-      const inProgressTaskResult = results[6].status === 'fulfilled' ? results[6].value : {};
-      const completedTaskResult = results[7].status === 'fulfilled' ? results[7].value : {};
+        results[3].status === 'fulfilled' ? results[3].value?.data?.summary || {} : {};
+      const totalTaskCount = results[4].status === 'fulfilled' ? results[4].value : 0;
+      const openTaskCount = results[5].status === 'fulfilled' ? results[5].value : 0;
+      const overdueTaskCount = results[6].status === 'fulfilled' ? results[6].value : 0;
+      const cancelledTaskCount = results[7].status === 'fulfilled' ? results[7].value : 0;
+      const completedTaskCount = results[8].status === 'fulfilled' ? results[8].value : 0;
 
-      const taskServiceHealthy = results.slice(3).every((result) => result.status === 'fulfilled');
+      const taskServiceHealthy = results.slice(4).every((result) => result.status === 'fulfilled');
+
+      const catalog = await getLocationCatalog();
+      const catalogCities = ((catalog?.get('cities') || []) as Array<any>)
+        .filter((city) => city?.enabled !== false)
+        .map((city) => String(city?.name || '').trim())
+        .filter(Boolean);
+      const comparisonCities = Array.from(new Set([
+        ...catalogCities,
+        'Rajagopalpet',
+      ])).sort((a, b) => a.localeCompare(b));
+
+      const cityComparisonUnfiltered = await Promise.all(
+        comparisonCities.map(async (comparisonCity) => {
+          const [customers, partners, totalWorks, openWorks, completedWorks, cancelledWorks, performance] =
+            await Promise.all([
+              userServiceClient.listUsers({ role: 'customer', city: comparisonCity, page: 1, limit: 1 }),
+              userServiceClient.listUsers({ role: 'partner', city: comparisonCity, page: 1, limit: 1 }),
+              TaskManagementController.countCustomerTasks(comparisonCity),
+              TaskManagementController.countCurrentlyOpenTasks(comparisonCity),
+              TaskManagementController.countCustomerTasksByStatus(['completed'], comparisonCity),
+              TaskManagementController.countCustomerTasksByStatus(['cancelled'], comparisonCity),
+              TaskManagementController.getCustomerTaskCategoryPerformance('30d', comparisonCity),
+            ]);
+          const customerCount = extractTotal(customers);
+          const partnerCount = extractTotal(partners);
+          return {
+            city: comparisonCity,
+            customers: customerCount,
+            partners: partnerCount,
+            worksPosted: Number(totalWorks || 0),
+            completionRate: Number(performance?.totals?.completionRate || 0),
+            cancellationRate: Number(performance?.totals?.cancellationRate || 0),
+            openWorks: Number(openWorks || 0),
+            completedWorks: Number(completedWorks || 0),
+            cancelledWorks: Number(cancelledWorks || 0),
+            partnersPerWork: totalWorks > 0
+              ? Number((partnerCount / Number(totalWorks)).toFixed(2))
+              : 0,
+          };
+        }),
+      );
+      const cityComparison = cityComparisonUnfiltered
+        .filter((row) => row.worksPosted > 0)
+        .sort((a, b) =>
+          b.worksPosted - a.worksPosted ||
+          a.city.localeCompare(b.city)
+        );
 
       const data = {
         platform: {
-          totalRegisteredUsers: userCounts.totalPlatformUsers,
+          totalRegisteredUsers: customerCount + allRegisteredPartners,
         },
         Customers: {
-          totalRegistered: userCounts.Customers,
+          totalRegistered: customerCount,
         },
         Helpers: {
-          totalRegistered: userCounts.Helpers,
+          totalRegistered: allRegisteredPartners,
           categoryCounts: helperCategoryCounts,
           categorySummary: {
             totalHelpers: Number(helperCategorySummary?.totalHelpers || 0),
@@ -212,12 +232,13 @@ export class AnalyticsController {
           aadhaarVerified: partnerAadhaarVerified,
         },
         tasks: {
-          total: extractTotal(totalTaskResult),
+          total: Number(totalTaskCount || 0),
           open: openTaskCount,
           overdue: overdueTaskCount,
-          inProgress: extractTotal(inProgressTaskResult),
-          completed: extractTotal(completedTaskResult),
+          cancelled: Number(cancelledTaskCount || 0),
+          completed: Number(completedTaskCount || 0),
         },
+        cityComparison,
         generatedAt: new Date().toISOString(),
         partial: {
           taskServiceUnavailable: !taskServiceHealthy,

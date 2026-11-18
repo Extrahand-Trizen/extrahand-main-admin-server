@@ -2,8 +2,10 @@ import { TaskPostedEmailAttempt } from '../models/TaskPostedEmailAttempt';
 
 export async function recordTaskPostedEmailAttempt(data: {
   taskId?: string;
-  status: 'sent' | 'failed' | 'skipped';
+  status: 'sent' | 'partial' | 'failed' | 'skipped';
   recipients?: string[];
+  sentRecipients?: string[];
+  failedRecipients?: string[];
   error?: string;
 }): Promise<void> {
   if (!data.taskId) return;
@@ -13,6 +15,8 @@ export async function recordTaskPostedEmailAttempt(data: {
       $set: {
         status: data.status,
         recipients: data.recipients || [],
+        sentRecipients: data.sentRecipients || [],
+        failedRecipients: data.failedRecipients || [],
         lastAttemptAt: new Date(),
         error: data.error,
       },
