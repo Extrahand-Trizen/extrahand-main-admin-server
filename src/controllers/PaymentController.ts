@@ -296,11 +296,81 @@ export class PaymentController {
     }
   }
 
+  static async getRefundById(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const data = await safeGet<any>(
+        `/api/v1/dashboard/refunds/${encodeURIComponent(id)}`,
+        req.query as Record<string, any>
+      );
+
+      res.json({
+        success: true,
+        data: {
+          refund: data.refund,
+          timeline: data.timeline ?? [],
+        },
+      });
+    } catch (error: any) {
+      logger.error('Get refund details error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to get refund details',
+      });
+    }
+  }
+
   static async listRefunds(req: Request, res: Response): Promise<void> {
     try {
+      const search = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+      const matchingUserUids = new Set<string>();
+      const matchingTaskIds = new Set<string>();
+
+      if (search) {
+        const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = new RegExp(escapedSearch, 'i');
+        await Promise.all([
+          (async () => {
+            try {
+              const profiles = await Profile.find({ name: searchRegex })
+                .select('uid')
+                .lean();
+              for (const profile of profiles) {
+                if (profile.uid) matchingUserUids.add(profile.uid);
+                if (profile._id) matchingUserUids.add(String(profile._id));
+              }
+            } catch (error) {
+              logger.warn('Profile lookup failed for refund search', {
+                message: (error as any)?.message,
+              });
+            }
+          })(),
+          (async () => {
+            try {
+              const tasks = await Task.find({ title: searchRegex }).select('_id').lean();
+              for (const task of tasks) {
+                matchingTaskIds.add(String(task._id));
+              }
+            } catch (error) {
+              logger.warn('Task title lookup failed for refund search', {
+                message: (error as any)?.message,
+              });
+            }
+          })(),
+        ]);
+      }
+
+      const upstreamParams: Record<string, any> = { ...(req.query as Record<string, any>) };
+      if (matchingUserUids.size > 0) {
+        upstreamParams.userUids = Array.from(matchingUserUids).join(',');
+      }
+      if (matchingTaskIds.size > 0) {
+        upstreamParams.taskIds = Array.from(matchingTaskIds).join(',');
+      }
+
       const data = await safeGet<any>(
         '/api/v1/dashboard/refunds',
-        req.query as Record<string, any>,
+        upstreamParams,
         { success: true, data: [], items: [], total: 0 }
       );
 
@@ -314,8 +384,10 @@ export class PaymentController {
         const posterUid =
           row.posterUid ||
           row.CustomerUid ||
+          row.CustomerId ||
           row.customerUid ||
           row.customerId ||
+          row.requesterId ||
           row.escrow?.posterUid ||
           row.escrow?.customerUid;
         if (posterUid) uniqueUids.add(posterUid);
@@ -333,7 +405,14 @@ export class PaymentController {
           tasks.forEach((t: any) => {
             const tid = String(t._id || t.id);
             if (t.title) taskTitleCache.set(tid, t.title);
-            const custId = t.customerId || t.posterUid || t.userId || t.creatorId;
+            const custId =
+              t.CustomerId ||
+              t.customerId ||
+              t.requesterId ||
+              t.posterUid ||
+              t.customerUid ||
+              t.userId ||
+              t.creatorId;
             if (custId) {
               taskCustomerMap.set(tid, String(custId));
               uniqueUids.add(String(custId));
@@ -346,22 +425,37 @@ export class PaymentController {
 
       if (uniqueUids.size > 0) {
         try {
-          const usersResult = await userServiceClient.getProfilesBatchByUids(Array.from(uniqueUids));
-          const users = usersResult?.profiles || [];
-          users.forEach((u: any) => {
-            userCache.set(u.uid, {
-              userId: u.uid,
-              name: u.name,
-            });
+          const userIds = Array.from(uniqueUids);
+          const profileObjectIds = userIds.filter((id) => /^[\da-f]{24}$/i.test(id));
+          const profiles = await Profile.find({
+            $or: [
+              { uid: { $in: userIds } },
+              ...(profileObjectIds.length > 0
+                ? [{ _id: { $in: profileObjectIds } }]
+                : []),
+            ],
+          })
+            .select('uid name')
+            .lean();
+          profiles.forEach((profile: any) => {
+            const resolved = {
+              userId: profile.uid || String(profile._id),
+              name: profile.name,
+            };
+            if (profile.uid) userCache.set(profile.uid, resolved);
+            if (profile._id) userCache.set(String(profile._id), resolved);
           });
         } catch (err) {
-          logger.warn('Batch user resolution for refunds failed');
+          logger.warn('Mongo profile lookup for refund customers failed', {
+            message: (err as any)?.message,
+          });
         }
       }
 
       const resolveUser = async (uid?: string): Promise<{ userId?: string; name?: string }> => {
         if (!uid) return {};
-        if (userCache.has(uid)) return userCache.get(uid) || {};
+        const cachedUser = userCache.get(uid);
+        if (cachedUser?.name) return cachedUser;
         try {
           const userResult = await userServiceClient.getUser(uid);
           const exact = userResult?.data || userResult;
@@ -396,8 +490,10 @@ export class PaymentController {
           let posterUid =
             row.CustomerUid ||
             row.posterUid ||
+            row.CustomerId ||
             row.customerUid ||
             row.customerId ||
+            row.requesterId ||
             row.escrow?.posterUid ||
             row.escrow?.customerUid;
           if (!posterUid && taskId && taskCustomerMap.has(taskId)) {

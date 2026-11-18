@@ -47,6 +47,12 @@ router.get(
   TaskManagementController.getAssignmentStatus
 );
 
+router.get(
+  '/:taskId/assignment-history',
+  requirePermission(`${Resource.TASK}.${Action.VIEW}`),
+  TaskManagementController.getTaskAssignmentHistory
+);
+
 router.post(
   '/assignments/backfill',
   requireSuperAdmin,

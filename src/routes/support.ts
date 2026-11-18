@@ -27,6 +27,12 @@ router.patch(
   SupportController.updateTicketStatus
 );
 
+router.post(
+  '/tickets/:ticketId/replies',
+  requirePermission(`${Resource.SUPPORT_TICKET}.${Action.UPDATE}`),
+  SupportController.replyToTicket
+);
+
 // Support article routes
 router.get(
   '/articles',

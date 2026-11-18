@@ -48,6 +48,7 @@ export class SupportServiceClient {
     page?: number;
     limit?: number;
     status?: string;
+    search?: string;
   }): Promise<any> {
     // Note: Support service uses its own auth system
     // We'll need to pass admin token or use service-to-service auth
