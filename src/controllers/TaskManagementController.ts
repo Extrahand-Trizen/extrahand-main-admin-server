@@ -254,12 +254,12 @@ async function enrichTasksWithAssignedTo(tasks: any[]): Promise<any[]> {
               });
             }
           }
-          const emailSent = await sendTaskPostedEmail({
+          const emailResult = await sendTaskPostedEmail({
             taskId,
             taskTitle: task.title,
             userName: customerName || task.userName || task.customerName || task.requesterName,
           });
-          if (emailSent) {
+          if (emailResult.sentRecipients.length > 0) {
             await AdminNotification.updateOne(
               { _id: existingNotification._id },
               { $set: { 'metadata.taskPostedEmailSentAt': new Date() } },
@@ -725,8 +725,22 @@ export class TaskManagementController {
     const now = new Date();
 
     return tasks.filter((task) => {
-      return task.status === 'open' && !isTaskOverdue(task, now);
+      return task.postedBy === 'customer' && task.status === 'open' && !isTaskOverdue(task, now);
     }).length;
+  }
+
+  static async countCustomerTasksByStatus(statuses: string[]): Promise<number> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const statusSet = new Set(statuses);
+
+    return tasks.filter((task) =>
+      task.postedBy === 'customer' && statusSet.has(task.status)
+    ).length;
+  }
+
+  static async countCustomerTasks(): Promise<number> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    return tasks.filter((task) => task.postedBy === 'customer').length;
   }
 
   static async countCurrentlyOverdueTasks(): Promise<number> {
@@ -1142,14 +1156,22 @@ export class TaskManagementController {
         return;
       }
 
-      const sent = await sendTaskPostedEmail({
+      const emailResult = await sendTaskPostedEmail({
         taskId,
         taskTitle: task?.title,
         userName: profile?.name || profile?.fullName,
         userPhone: profile?.phone,
       });
 
-      res.json({ success: sent, sent, skipped: !sent });
+      const sent = emailResult.sentRecipients.length > 0;
+      res.json({
+        success: sent,
+        sent,
+        partial: emailResult.status === 'partial',
+        skipped: emailResult.status === 'skipped',
+        failedRecipients: emailResult.failedRecipients,
+        error: emailResult.error,
+      });
     } catch (error: any) {
       logger.error('Manual task-posted email error', {
         taskId: req.params.taskId,

@@ -77,7 +77,7 @@ export async function createTaskPostedAdminNotification(
   assignedTo?: { userId: string; email: string; name: string };
 }> {
   const notification = buildNotificationPayload({ type: 'task_posted', ...payload });
-  const emailSent = await sendTaskPostedEmail(payload);
+  const emailResult = await sendTaskPostedEmail(payload);
   const recipient = await getNextTaskPostedRecipient();
 
   if (!recipient) {
@@ -110,7 +110,7 @@ export async function createTaskPostedAdminNotification(
       assignedToUserId: recipient.userId,
       assignedToEmail: recipient.email,
       assignedToName: recipient.name,
-      ...(emailSent ? { taskPostedEmailSentAt: new Date() } : {}),
+      ...(emailResult.sentRecipients.length > 0 ? { taskPostedEmailSentAt: new Date() } : {}),
     },
   });
 

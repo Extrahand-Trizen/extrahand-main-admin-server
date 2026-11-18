@@ -151,16 +151,17 @@ export class AnalyticsController {
           page: 1,
           limit: 1,
         }),
-        userServiceClient.getHelperCategoryCounts(),
-        taskServiceClient.listTasks({ page: 1, limit: 1 }),
-        TaskManagementController.countCurrentlyOpenTasks(),
-        TaskManagementController.countCurrentlyOverdueTasks(),
-        taskServiceClient.listTasks({
+        userServiceClient.listUsers({
+          role: 'partner',
           page: 1,
           limit: 1,
-          status: 'assigned,started,in_progress,review',
         }),
-        taskServiceClient.listTasks({ page: 1, limit: 1, status: 'completed' }),
+        userServiceClient.getHelperCategoryCounts(),
+        TaskManagementController.countCustomerTasks(),
+        TaskManagementController.countCurrentlyOpenTasks(),
+        TaskManagementController.countCurrentlyOverdueTasks(),
+        TaskManagementController.countCustomerTasksByStatus(['cancelled']),
+        TaskManagementController.countCustomerTasksByStatus(['completed']),
       ]);
 
       const userCountsRaw =
@@ -176,21 +177,24 @@ export class AnalyticsController {
       const partnerAadhaarResult =
         results[1].status === 'fulfilled' ? results[1].value : {};
       const partnerAadhaarVerified = extractTotal(partnerAadhaarResult);
+      const partnerResult =
+        results[2].status === 'fulfilled' ? results[2].value : {};
+      const allRegisteredPartners = extractTotal(partnerResult);
       const helperCategoryCounts =
-        results[2].status === 'fulfilled'
-          ? Array.isArray(results[2].value?.data?.categories)
-            ? results[2].value.data.categories
+        results[3].status === 'fulfilled'
+          ? Array.isArray(results[3].value?.data?.categories)
+            ? results[3].value.data.categories
             : []
           : [];
       const helperCategorySummary =
-        results[2].status === 'fulfilled' ? results[2].value?.data?.summary || {} : {};
-      const totalTaskResult = results[3].status === 'fulfilled' ? results[3].value : {};
-      const openTaskCount = results[4].status === 'fulfilled' ? results[4].value : 0;
-      const overdueTaskCount = results[5].status === 'fulfilled' ? results[5].value : 0;
-      const inProgressTaskResult = results[6].status === 'fulfilled' ? results[6].value : {};
-      const completedTaskResult = results[7].status === 'fulfilled' ? results[7].value : {};
+        results[3].status === 'fulfilled' ? results[3].value?.data?.summary || {} : {};
+      const totalTaskCount = results[4].status === 'fulfilled' ? results[4].value : 0;
+      const openTaskCount = results[5].status === 'fulfilled' ? results[5].value : 0;
+      const overdueTaskCount = results[6].status === 'fulfilled' ? results[6].value : 0;
+      const cancelledTaskCount = results[7].status === 'fulfilled' ? results[7].value : 0;
+      const completedTaskCount = results[8].status === 'fulfilled' ? results[8].value : 0;
 
-      const taskServiceHealthy = results.slice(3).every((result) => result.status === 'fulfilled');
+      const taskServiceHealthy = results.slice(4).every((result) => result.status === 'fulfilled');
 
       const data = {
         platform: {
@@ -200,7 +204,7 @@ export class AnalyticsController {
           totalRegistered: userCounts.Customers,
         },
         Helpers: {
-          totalRegistered: userCounts.Helpers,
+          totalRegistered: allRegisteredPartners,
           categoryCounts: helperCategoryCounts,
           categorySummary: {
             totalHelpers: Number(helperCategorySummary?.totalHelpers || 0),
@@ -212,11 +216,11 @@ export class AnalyticsController {
           aadhaarVerified: partnerAadhaarVerified,
         },
         tasks: {
-          total: extractTotal(totalTaskResult),
+          total: Number(totalTaskCount || 0),
           open: openTaskCount,
           overdue: overdueTaskCount,
-          inProgress: extractTotal(inProgressTaskResult),
-          completed: extractTotal(completedTaskResult),
+          cancelled: Number(cancelledTaskCount || 0),
+          completed: Number(completedTaskCount || 0),
         },
         generatedAt: new Date().toISOString(),
         partial: {

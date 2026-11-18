@@ -2,8 +2,10 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface TaskPostedEmailAttemptDocument extends Document {
   taskId: string;
-  status: 'sent' | 'failed' | 'skipped';
+  status: 'sent' | 'partial' | 'failed' | 'skipped';
   recipients: string[];
+  sentRecipients: string[];
+  failedRecipients: string[];
   lastAttemptAt: Date;
   error?: string;
   updatedAt: Date;
@@ -12,8 +14,10 @@ export interface TaskPostedEmailAttemptDocument extends Document {
 const TaskPostedEmailAttemptSchema = new Schema<TaskPostedEmailAttemptDocument>(
   {
     taskId: { type: String, required: true, unique: true },
-    status: { type: String, enum: ['sent', 'failed', 'skipped'], required: true },
+    status: { type: String, enum: ['sent', 'partial', 'failed', 'skipped'], required: true },
     recipients: { type: [String], default: [] },
+    sentRecipients: { type: [String], default: [] },
+    failedRecipients: { type: [String], default: [] },
     lastAttemptAt: { type: Date, required: true, default: Date.now },
     error: { type: String },
   },
