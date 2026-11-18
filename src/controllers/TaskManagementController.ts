@@ -720,34 +720,313 @@ export class TaskManagementController {
     return buildTasksPromise;
   }
 
-  static async countCurrentlyOpenTasks(): Promise<number> {
+  static async countCurrentlyOpenTasks(city?: string): Promise<number> {
     const tasks = await TaskManagementController.getCompiledTasks();
     const now = new Date();
 
     return tasks.filter((task) => {
-      return task.postedBy === 'customer' && task.status === 'open' && !isTaskOverdue(task, now);
+      return task.postedBy === 'customer'
+        && (!city || TaskManagementController.taskMatchesCity(task, city))
+        && task.status === 'open'
+        && !isTaskOverdue(task, now);
     }).length;
   }
 
-  static async countCustomerTasksByStatus(statuses: string[]): Promise<number> {
+  static async countCustomerTasksByStatus(statuses: string[], city?: string): Promise<number> {
     const tasks = await TaskManagementController.getCompiledTasks();
     const statusSet = new Set(statuses);
 
     return tasks.filter((task) =>
-      task.postedBy === 'customer' && statusSet.has(task.status)
+      task.postedBy === 'customer'
+      && (!city || TaskManagementController.taskMatchesCity(task, city))
+      && statusSet.has(task.status)
     ).length;
   }
 
-  static async countCustomerTasks(): Promise<number> {
+  static async countCustomerTasks(city?: string): Promise<number> {
     const tasks = await TaskManagementController.getCompiledTasks();
-    return tasks.filter((task) => task.postedBy === 'customer').length;
+    return tasks.filter((task) =>
+      task.postedBy === 'customer'
+      && (!city || TaskManagementController.taskMatchesCity(task, city))
+    ).length;
   }
 
-  static async countCurrentlyOverdueTasks(): Promise<number> {
+  private static taskMatchesCity(task: any, city: string): boolean {
+    const normalizedCity = city.trim().toLowerCase();
+    if (!normalizedCity || normalizedCity === 'all') return true;
+    const values = [
+      task.location?.city,
+      task.location?.addressDetails?.city,
+      task.city,
+    ];
+    return values.some((value) =>
+      typeof value === 'string' && value.trim().toLowerCase() === normalizedCity
+    );
+  }
+
+  static async getCustomerTaskCategoryBreakdown(
+    range: '7d' | '30d' | '90d',
+    city?: string,
+  ): Promise<{
+    range: string;
+    categories: Array<{
+      category: string;
+      count: number;
+      subcategories: Array<{ subcategory: string; count: number }>;
+    }>;
+    generatedAt: string;
+  }> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeStart = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const subcategoryMap = new Map<string, Map<string, number>>();
+    const categoryCounts = new Map<string, number>();
+
+    for (const task of tasks) {
+      if (task.postedBy !== 'customer') continue;
+      if (city && !TaskManagementController.taskMatchesCity(task, city)) continue;
+      const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      if (!Number.isFinite(createdAt) || createdAt < rangeStart) continue;
+
+      const category = String(
+        task.categorySlug || task.categoryLabel || task.category || 'other',
+      ).trim() || 'other';
+      categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+
+      const subcategory = String(task.subcategory || 'unspecified').trim() || 'unspecified';
+      const subcategoryCounts = subcategoryMap.get(category) || new Map<string, number>();
+      subcategoryCounts.set(subcategory, (subcategoryCounts.get(subcategory) || 0) + 1);
+      subcategoryMap.set(category, subcategoryCounts);
+    }
+
+    const categories = Array.from(categoryCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, count]) => ({
+        category,
+        count,
+        subcategories: Array.from((subcategoryMap.get(category) || new Map()).entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([subcategory, subcategoryCount]) => ({
+            subcategory,
+            count: subcategoryCount,
+          })),
+      }));
+
+    return { range, categories, generatedAt: new Date().toISOString() };
+  }
+
+  static async getCustomerTaskCategoryPerformance(
+    range: '7d' | '30d' | '90d',
+    city?: string,
+  ): Promise<{
+    range: string;
+    totals: {
+      posted: number;
+      open: number;
+      active: number;
+      completed: number;
+      cancelled: number;
+      completionRate: number;
+      cancellationRate: number;
+    };
+    categories: Array<{
+      category: string;
+      posted: number;
+      open: number;
+      active: number;
+      completed: number;
+      cancelled: number;
+      completionRate: number;
+      cancellationRate: number;
+      fulfillmentRate: number;
+    }>;
+    generatedAt: string;
+  }> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeStart = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const activeStatuses = new Set(['assigned', 'started', 'in_progress', 'review']);
+    const categoryMap = new Map<string, {
+      posted: number;
+      open: number;
+      active: number;
+      completed: number;
+      cancelled: number;
+    }>();
+
+    for (const task of tasks) {
+      if (task.postedBy !== 'customer') continue;
+      if (city && !TaskManagementController.taskMatchesCity(task, city)) continue;
+      const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      if (!Number.isFinite(createdAt) || createdAt < rangeStart) continue;
+
+      const category = String(
+        task.categorySlug || task.categoryLabel || task.category || 'other',
+      ).trim() || 'other';
+      const counts = categoryMap.get(category) || { posted: 0, open: 0, active: 0, completed: 0, cancelled: 0 };
+      counts.posted += 1;
+      if (task.status === 'open') counts.open += 1;
+      if (activeStatuses.has(task.status)) counts.active += 1;
+      if (task.status === 'completed') counts.completed += 1;
+      if (task.status === 'cancelled') counts.cancelled += 1;
+      categoryMap.set(category, counts);
+    }
+
+    const categories = Array.from(categoryMap.entries())
+      .sort((a, b) => b[1].posted - a[1].posted)
+      .map(([category, counts]) => {
+        const completionRate = counts.posted > 0
+          ? Number(((counts.completed / counts.posted) * 100).toFixed(1))
+          : 0;
+        const cancellationRate = counts.posted > 0
+          ? Number(((counts.cancelled / counts.posted) * 100).toFixed(1))
+          : 0;
+        const fulfillmentRate = counts.posted > 0
+          ? Number((((counts.active + counts.completed) / counts.posted) * 100).toFixed(1))
+          : 0;
+        return { category, ...counts, completionRate, cancellationRate, fulfillmentRate };
+      });
+
+    const totals = categories.reduce(
+      (acc, row) => {
+        acc.posted += row.posted;
+        acc.open += row.open;
+        acc.active += row.active;
+        acc.completed += row.completed;
+        acc.cancelled += row.cancelled;
+        return acc;
+      },
+      { posted: 0, open: 0, active: 0, completed: 0, cancelled: 0 },
+    );
+
+    return {
+      range,
+      totals: {
+        ...totals,
+        completionRate: totals.posted > 0
+          ? Number(((totals.completed / totals.posted) * 100).toFixed(1))
+          : 0,
+        cancellationRate: totals.posted > 0
+          ? Number(((totals.cancelled / totals.posted) * 100).toFixed(1))
+          : 0,
+      },
+      categories,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  static async getCustomerTaskCancellationAnalytics(
+    range: '7d' | '30d' | '90d',
+    city?: string,
+  ): Promise<{
+    range: string;
+    totals: {
+      totalTasks: number;
+      cancelledTasks: number;
+      cancellationRate: number;
+      cancelledBeforeAssignment: number;
+      cancelledAfterAssignment: number;
+    };
+    trend: Array<{
+      date: string;
+      totalTasks: number;
+      cancelledTasks: number;
+      cancellationRate: number;
+    }>;
+    categories: Array<{
+      category: string;
+      totalTasks: number;
+      cancelledTasks: number;
+      cancellationRate: number;
+    }>;
+    generatedAt: string;
+  }> {
+    const tasks = await TaskManagementController.getCompiledTasks();
+    const rangeDays = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const rangeStart = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+    const categoryMap = new Map<string, { totalTasks: number; cancelledTasks: number }>();
+    const trendMap = new Map<string, { totalTasks: number; cancelledTasks: number }>();
+    let totalTasks = 0;
+    let cancelledTasks = 0;
+    let cancelledBeforeAssignment = 0;
+    let cancelledAfterAssignment = 0;
+
+    for (const task of tasks) {
+      if (task.postedBy !== 'customer') continue;
+      if (city && !TaskManagementController.taskMatchesCity(task, city)) continue;
+      const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      if (!Number.isFinite(createdAt) || createdAt < rangeStart) continue;
+
+      const category = String(
+        task.categorySlug || task.categoryLabel || task.category || 'other',
+      ).trim() || 'other';
+      const categoryCounts = categoryMap.get(category) || { totalTasks: 0, cancelledTasks: 0 };
+      categoryCounts.totalTasks += 1;
+      totalTasks += 1;
+
+      const date = new Date(createdAt).toISOString().slice(0, 10);
+      const trendCounts = trendMap.get(date) || { totalTasks: 0, cancelledTasks: 0 };
+      trendCounts.totalTasks += 1;
+
+      if (task.status === 'cancelled') {
+        cancelledTasks += 1;
+        categoryCounts.cancelledTasks += 1;
+        trendCounts.cancelledTasks += 1;
+        if (task.assigneeId) cancelledAfterAssignment += 1;
+        else cancelledBeforeAssignment += 1;
+      }
+
+      categoryMap.set(category, categoryCounts);
+      trendMap.set(date, trendCounts);
+    }
+
+    const categories = Array.from(categoryMap.entries())
+      .sort((a, b) => b[1].totalTasks - a[1].totalTasks)
+      .map(([category, counts]) => ({
+        category,
+        ...counts,
+        cancellationRate: counts.totalTasks > 0
+          ? Number(((counts.cancelledTasks / counts.totalTasks) * 100).toFixed(1))
+          : 0,
+      }));
+
+    const trend = Array.from(trendMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, counts]) => ({
+        date,
+        ...counts,
+        cancellationRate: counts.totalTasks > 0
+          ? Number(((counts.cancelledTasks / counts.totalTasks) * 100).toFixed(1))
+          : 0,
+      }));
+
+    return {
+      range,
+      totals: {
+        totalTasks,
+        cancelledTasks,
+        cancellationRate: totalTasks > 0
+          ? Number(((cancelledTasks / totalTasks) * 100).toFixed(1))
+          : 0,
+        cancelledBeforeAssignment,
+        cancelledAfterAssignment,
+      },
+      trend,
+      categories,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  static async countCurrentlyOverdueTasks(city?: string): Promise<number> {
     const tasks = await TaskManagementController.getCompiledTasks();
     const now = new Date();
 
-    return tasks.filter((task) => isTaskOverdue(task, now)).length;
+    return tasks.filter((task) =>
+      task.postedBy === 'customer'
+      && (!city || TaskManagementController.taskMatchesCity(task, city))
+      && isTaskOverdue(task, now)
+    ).length;
   }
 
   /**
