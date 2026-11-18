@@ -3,8 +3,8 @@ import mongoose from 'mongoose';
 import logger from '../config/logger';
 import { env } from '../config/env';
 import { getTaskPostedEmailSettings, isPhoneExcluded } from './TaskPostedEmailSettingsService';
-import { recordTaskPostedEmailAttempt } from './TaskPostedEmailAttemptService';
-import { sendToRecipientsIndividually } from './TaskPostedEmailRecipients';
+import { getTaskPostedEmailAttempt, recordTaskPostedEmailAttempt } from './TaskPostedEmailAttemptService';
+import { selectRetryRecipients, sendToRecipientsIndividually } from './TaskPostedEmailRecipients';
 
 type TaskPostedEmailPayload = {
   taskId?: string;
@@ -19,6 +19,7 @@ export type TaskPostedEmailResult = {
   sentRecipients: string[];
   failedRecipients: string[];
   error?: string;
+  reason?: string;
 };
 
 async function resolveCustomerPhone(payload: TaskPostedEmailPayload): Promise<string | undefined> {
@@ -47,7 +48,10 @@ async function resolveCustomerPhone(payload: TaskPostedEmailPayload): Promise<st
   }
 }
 
-export async function sendTaskPostedEmail(payload: TaskPostedEmailPayload): Promise<TaskPostedEmailResult> {
+export async function sendTaskPostedEmail(
+  payload: TaskPostedEmailPayload,
+  options: { retryFailedOnly?: boolean } = {},
+): Promise<TaskPostedEmailResult> {
   if (!env.EMAIL_SERVICE_URL) {
     logger.warn('[TaskPostedEmail][main-admin-server] Email service URL is not configured');
     await recordTaskPostedEmailAttempt({ taskId: payload.taskId, status: 'failed', error: 'Email service URL is not configured' });
@@ -66,14 +70,29 @@ export async function sendTaskPostedEmail(payload: TaskPostedEmailPayload): Prom
     return { status: 'skipped', sentRecipients: [], failedRecipients: [], error: 'Customer phone is excluded' };
   }
 
-  const recipients = settings.recipients;
-  if (recipients.length === 0) {
+  const configuredRecipients = settings.recipients;
+  if (configuredRecipients.length === 0) {
     logger.warn('[TaskPostedEmail][main-admin-server] No work-posted email recipients configured', {
       taskId: payload.taskId,
       taskTitle: payload.taskTitle,
     });
     await recordTaskPostedEmailAttempt({ taskId: payload.taskId, status: 'failed', error: 'No recipients configured' });
     return { status: 'failed', sentRecipients: [], failedRecipients: [], error: 'No recipients configured' };
+  }
+  const previousAttempt = options.retryFailedOnly
+    ? await getTaskPostedEmailAttempt(payload.taskId)
+    : null;
+  const recipients = options.retryFailedOnly
+    ? selectRetryRecipients(previousAttempt, configuredRecipients)
+    : configuredRecipients;
+  if (recipients.length === 0) {
+    return {
+      status: 'skipped',
+      sentRecipients: previousAttempt?.sentRecipients || [],
+      failedRecipients: [],
+      error: 'There are no failed recipients to retry',
+      reason: 'no_failed_recipients',
+    };
   }
   const taskTitle = payload.taskTitle?.trim() || 'Untitled task';
   const customerName = payload.userName?.trim() || 'A customer';
@@ -109,7 +128,10 @@ export async function sendTaskPostedEmail(payload: TaskPostedEmailPayload): Prom
         throw new Error(response.data.error || 'Email service rejected the request');
       }
     });
-    const sentRecipients = outcomes.sentRecipients;
+    const sentRecipients = Array.from(new Set([
+      ...(previousAttempt?.sentRecipients || []),
+      ...outcomes.sentRecipients,
+    ]));
     const failedRecipients = outcomes.failures.map((failure) => failure.recipient);
     const status: TaskPostedEmailResult['status'] = failedRecipients.length === 0
       ? 'sent'
@@ -141,7 +163,7 @@ export async function sendTaskPostedEmail(payload: TaskPostedEmailPayload): Prom
     await recordTaskPostedEmailAttempt({
       taskId: payload.taskId,
       status,
-      recipients,
+      recipients: previousAttempt?.recipients?.length ? previousAttempt.recipients : configuredRecipients,
       sentRecipients,
       failedRecipients,
       error,
@@ -156,12 +178,14 @@ export async function sendTaskPostedEmail(payload: TaskPostedEmailPayload): Prom
     await recordTaskPostedEmailAttempt({
       taskId: payload.taskId,
       status: 'failed',
-      recipients,
+      recipients: previousAttempt?.recipients?.length ? previousAttempt.recipients : configuredRecipients,
+      sentRecipients: previousAttempt?.sentRecipients || [],
+      failedRecipients: recipients,
       error: error?.message || String(error),
     });
     return {
       status: 'failed',
-      sentRecipients: [],
+      sentRecipients: previousAttempt?.sentRecipients || [],
       failedRecipients: recipients,
       error: error?.message || String(error),
     };

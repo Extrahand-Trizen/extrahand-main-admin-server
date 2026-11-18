@@ -31,16 +31,18 @@ async function safeGet<T>(
 export class PaymentController {
   static async getOverview(req: Request, res: Response): Promise<void> {
     try {
-      const overviewResult = await safeGet<any>(
-        '/api/v1/dashboard/overview',
-        req.query as Record<string, any>,
-        {}
-      );
-      const anomaliesResult = await safeGet<any>(
-        '/api/v1/dashboard/anomalies',
-        req.query as Record<string, any>,
-        { anomalies: { counts: {} } }
-      );
+      const [overviewResult, anomaliesResult] = await Promise.all([
+        safeGet<any>(
+          '/api/v1/dashboard/overview',
+          req.query as Record<string, any>,
+          {}
+        ),
+        safeGet<any>(
+          '/api/v1/dashboard/anomalies',
+          {},
+          { anomalies: { counts: {} } }
+        ),
+      ]);
 
       const o = overviewResult?.overview ?? overviewResult ?? {};
       const counts = anomaliesResult?.anomalies?.counts ?? {};

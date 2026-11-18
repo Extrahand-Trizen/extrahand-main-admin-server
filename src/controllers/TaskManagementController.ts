@@ -1440,7 +1440,7 @@ export class TaskManagementController {
         taskTitle: task?.title,
         userName: profile?.name || profile?.fullName,
         userPhone: profile?.phone,
-      });
+      }, { retryFailedOnly: true });
 
       const sent = emailResult.sentRecipients.length > 0;
       res.json({
@@ -1448,6 +1448,7 @@ export class TaskManagementController {
         sent,
         partial: emailResult.status === 'partial',
         skipped: emailResult.status === 'skipped',
+        reason: emailResult.reason,
         failedRecipients: emailResult.failedRecipients,
         error: emailResult.error,
       });
