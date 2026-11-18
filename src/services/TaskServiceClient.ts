@@ -73,6 +73,13 @@ export class TaskServiceClient {
     return response.data;
   }
 
+  async getTaskAssignmentHistory(taskId: string): Promise<any> {
+    const response = await this.client.get(
+      `/api/v1/admin/assignment-history/${encodeURIComponent(taskId)}`
+    );
+    return response.data;
+  }
+
   async getTasksBatch(taskIds: string[]): Promise<any> {
     if (!taskIds.length) return { tasks: [] };
     const key = `batch:${taskIds.sort().join(',')}`;

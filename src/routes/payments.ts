@@ -55,6 +55,12 @@ router.get(
   PaymentController.listRefunds
 );
 
+router.get(
+  '/refunds/:id',
+  requirePermission(`${Resource.PAYMENT}.${Action.LIST}`),
+  PaymentController.getRefundById
+);
+
 router.post(
   '/refunds/process',
   requirePermission(`${Resource.PAYMENT}.${Action.UPDATE}`),

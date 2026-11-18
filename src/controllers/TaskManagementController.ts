@@ -1372,6 +1372,12 @@ export class TaskManagementController {
       const couponRedemption = couponEnrichedTasks[0]?.couponRedemption || null;
       const enrichedTask = {
         ...normalizedTask,
+        customerId: requesterId || normalizedTask.customerId,
+        customerName:
+          customerProfile?.name ||
+          customerProfile?.fullName ||
+          [customerProfile?.firstName, customerProfile?.lastName].filter(Boolean).join(' ') ||
+          normalizedTask.customerName,
         couponCode:
           couponRedemption?.couponCode ||
           bookingOrder?.couponCode ||
@@ -1403,6 +1409,19 @@ export class TaskManagementController {
       res.status(getClientSafeStatus(error)).json({
         success: false,
         error: error.response?.data?.error || 'Failed to get task',
+      });
+    }
+  }
+
+  static async getTaskAssignmentHistory(req: Request, res: Response): Promise<void> {
+    try {
+      const data = await taskServiceClient.getTaskAssignmentHistory(req.params.taskId);
+      res.json({ success: true, data: data?.data ?? null });
+    } catch (error: any) {
+      logger.error('Get task assignment history error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: error.response?.data?.error || 'Failed to get task assignment history',
       });
     }
   }
