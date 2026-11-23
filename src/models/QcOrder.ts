@@ -119,6 +119,10 @@ export interface IQcOrderDocument extends Document {
 
   executionPhase?: 'assigned' | 'on_the_way' | 'arrived';
   executionPhaseUpdatedAt?: Date;
+  journeyStarted?: {
+    at: Date;
+    location?: { lat: number; lng: number } | null;
+  };
   onTheWayAt?: Date;
   arrivedAt?: Date;
 
@@ -321,6 +325,13 @@ const QcOrderSchema = new Schema<IQcOrderDocument>(
 
     executionPhase: { type: String, enum: ['assigned', 'on_the_way', 'arrived'] },
     executionPhaseUpdatedAt: { type: Date },
+    journeyStarted: {
+      at: { type: Date },
+      location: {
+        lat: { type: Number, min: -90, max: 90 },
+        lng: { type: Number, min: -180, max: 180 },
+      },
+    },
     onTheWayAt: { type: Date },
     arrivedAt: { type: Date },
 

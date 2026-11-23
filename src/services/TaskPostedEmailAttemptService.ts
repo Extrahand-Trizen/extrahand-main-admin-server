@@ -1,5 +1,10 @@
 import { TaskPostedEmailAttempt } from '../models/TaskPostedEmailAttempt';
 
+export async function getTaskPostedEmailAttempt(taskId?: string) {
+  if (!taskId) return null;
+  return TaskPostedEmailAttempt.findOne({ taskId }).lean();
+}
+
 export async function recordTaskPostedEmailAttempt(data: {
   taskId?: string;
   status: 'sent' | 'partial' | 'failed' | 'skipped';

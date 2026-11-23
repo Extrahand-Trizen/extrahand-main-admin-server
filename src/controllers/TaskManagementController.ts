@@ -1459,7 +1459,7 @@ export class TaskManagementController {
         taskTitle: task?.title,
         userName: profile?.name || profile?.fullName,
         userPhone: profile?.phone,
-      });
+      }, { retryFailedOnly: true });
 
       const sent = emailResult.sentRecipients.length > 0;
       res.json({
@@ -1467,6 +1467,7 @@ export class TaskManagementController {
         sent,
         partial: emailResult.status === 'partial',
         skipped: emailResult.status === 'skipped',
+        reason: emailResult.reason,
         failedRecipients: emailResult.failedRecipients,
         error: emailResult.error,
       });
@@ -1994,8 +1995,43 @@ export class TaskManagementController {
       }
 
       // Perform the delete using admin privileges (task-service bypasses requester check for main-admin-service)
-      await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason);
-      TaskManagementController.invalidateCache();
+      try {
+        await taskServiceClient.deleteTask(requestDoc.taskId, requestDoc.reason);
+        TaskManagementController.invalidateCache();
+      } catch (deleteError: any) {
+        const taskErrMsg: string =
+          deleteError.response?.data?.error || deleteError.message || '';
+        if (taskErrMsg.toLowerCase().includes('task not found')) {
+          // Work is already deleted — auto-approve the request so it leaves the pending list permanently
+          logger.info(
+            `Task ${requestDoc.taskId} already deleted; auto-approving delete request ${requestId}`,
+          );
+          requestDoc.status = 'approved';
+          requestDoc.decidedBy = {
+            userId: req.admin!.userId,
+            email: req.admin!.email,
+            name: req.admin!.name,
+          };
+          requestDoc.decidedAt = new Date();
+          requestDoc.decisionNote = 'Work was already deleted before this request was processed.';
+          await requestDoc.save();
+
+          await createAuditLog(
+            req,
+            `${Resource.TASK}.delete_request.approve`,
+            Resource.TASK,
+            requestDoc.taskId,
+            { requestId, autoApproved: true, reason: 'task_already_deleted' },
+          );
+
+          res.json({
+            success: true,
+            data: { requestId, status: requestDoc.status, alreadyDeleted: true },
+          });
+          return;
+        }
+        throw deleteError;
+      }
 
       requestDoc.status = 'approved';
       requestDoc.decidedBy = {
