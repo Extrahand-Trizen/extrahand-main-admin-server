@@ -19,6 +19,11 @@ import {
 } from '../services/WhatsAppCampaignService';
 import { userServiceClient } from '../services/UserServiceClient';
 import { taskServiceClient } from '../services/TaskServiceClient';
+import { Profile } from '../models/Profile';
+import {
+  getTaskPostedEmailSettings,
+  isPhoneInExclusionList,
+} from '../services/TaskPostedEmailSettingsService';
 import type { WhatsAppCampaignApp } from '../models/WhatsAppNotificationCampaign';
 
 const WHATSAPP_APPS: WhatsAppCampaignApp[] = [
@@ -47,6 +52,14 @@ type WorkOfferCandidate = {
 
 type WorkOfferTaskState = {
   status?: string;
+  isTeamPosted?: boolean;
+  postedBy?: string;
+  requesterId?: string;
+  customerId?: string;
+  CustomerId?: string;
+  requesterPhone?: string;
+  customerPhone?: string;
+  customer?: { phone?: string };
   assigneeId?: unknown;
   assigneeUid?: unknown;
   partnerId?: unknown;
@@ -65,6 +78,39 @@ type WorkOfferTaskState = {
     expiresAt?: string | Date | null;
   };
 };
+
+async function isTeamPostedWork(taskId: string): Promise<boolean> {
+  const response = await taskServiceClient.getTask(taskId);
+  const task: WorkOfferTaskState | undefined = response?.data;
+  if (!task || typeof task !== 'object') {
+    throw new Error('Task service returned an invalid task response');
+  }
+  if (task.isTeamPosted === true || task.postedBy === 'team') return true;
+
+  const requesterId = String(
+    task.CustomerId || task.customerId || task.requesterId || '',
+  ).trim();
+  const profileQuery: Record<string, unknown>[] = [];
+  if (requesterId) {
+    profileQuery.push({ uid: requesterId });
+    if (mongoose.Types.ObjectId.isValid(requesterId)) {
+      profileQuery.push({ _id: new mongoose.Types.ObjectId(requesterId) });
+    }
+  }
+  const profile = profileQuery.length
+    ? await Profile.findOne({ $or: profileQuery }).select('phone').lean()
+    : null;
+  const settings = await getTaskPostedEmailSettings();
+  const customerPhone =
+    profile?.phone ||
+    task.customerPhone ||
+    task.requesterPhone ||
+    task.customer?.phone;
+  return (
+    !profile ||
+    isPhoneInExclusionList(customerPhone, settings.excludedPhones)
+  );
+}
 
 async function canSendOtherEligibleStage(taskId: string): Promise<boolean> {
   const response = await taskServiceClient.getTask(taskId);
@@ -348,6 +394,13 @@ export class WhatsAppNotificationController {
     }
 
     try {
+      if (await isTeamPostedWork(taskId)) {
+        res.status(409).json({
+          success: false,
+          error: 'Partner WhatsApp notifications are disabled for team-posted work',
+        });
+        return;
+      }
       if (
         stage === 'all' &&
         !(await canSendOtherEligibleStage(taskId))
@@ -433,6 +486,13 @@ export class WhatsAppNotificationController {
       return;
     }
     try {
+      if (await isTeamPostedWork(taskId)) {
+        res.status(409).json({
+          success: false,
+          error: 'Partner WhatsApp notifications are disabled for team-posted work',
+        });
+        return;
+      }
       if (
         stage === 'all' &&
         !(await canSendOtherEligibleStage(taskId))
