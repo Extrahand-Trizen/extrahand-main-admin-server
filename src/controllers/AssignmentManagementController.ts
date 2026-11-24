@@ -17,17 +17,23 @@ function normalizePhone(phone: string): string {
   return String(phone || '').replace(/\D/g, '');
 }
 
-function normalizePreferredPartners(partners: any[], includeAttribution: boolean): any[] {
-  return [...partners]
+function normalizePreferredPartners(
+  partners: any[],
+  includeAttribution: boolean,
+  sortByPriority = true,
+): any[] {
+  const normalizedPartners = [...partners]
     .map((partner) => {
       const normalized = typeof partner?.toObject === 'function' ? partner.toObject() : { ...partner };
       if (!includeAttribution) delete normalized.addedBy;
       return normalized;
-    })
-    .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
+    });
+  return sortByPriority
+    ? normalizedPartners.sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0))
+    : normalizedPartners;
 }
 
-function normalizeAreaRule(rule: any, includeAttribution = false) {
+function normalizeAreaRule(rule: any, includeAttribution = false, sortPartnersByPriority = true) {
   return {
     area: String(rule.area || rule._doc?.area || ''),
     category: rule.category || rule._doc?.category || undefined,
@@ -39,6 +45,7 @@ function normalizeAreaRule(rule: any, includeAttribution = false) {
     preferredPartners: normalizePreferredPartners(
       rule.preferredPartners || rule._doc?.preferredPartners || [],
       includeAttribution,
+      sortPartnersByPriority,
     ),
   };
 }
@@ -118,7 +125,21 @@ export class AssignmentManagementController {
         getCityAssignmentAreaNames(city),
         workType,
         category,
-      ).map((rule) => normalizeAreaRule(rule, Boolean(req.admin?.isSuperAdmin)));
+      ).map((rule) => {
+        const normalizedRule = normalizeAreaRule(
+          rule,
+          Boolean(req.admin?.isSuperAdmin),
+          false,
+        );
+        return {
+          ...normalizedRule,
+          preferredPartners: normalizedRule.preferredPartners.map((partner: any) => {
+            const partnerWithoutPriority = { ...partner };
+            delete partnerWithoutPriority.priority;
+            return partnerWithoutPriority;
+          }),
+        };
+      });
 
       res.json({
         success: true,
