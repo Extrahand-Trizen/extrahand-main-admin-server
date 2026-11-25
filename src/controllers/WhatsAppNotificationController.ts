@@ -45,6 +45,7 @@ function parsePage(value: unknown, fallback: number, max: number): number | null
 const DISPATCH_STAGES = ['preferred', 'area_rule', 'all'] as const;
 
 type WorkOfferCandidate = {
+  partnerUid?: string;
   dispatchStage?: string;
   status?: string;
   responseStatus?: string;
@@ -79,13 +80,16 @@ type WorkOfferTaskState = {
   };
 };
 
-async function isTeamPostedWork(taskId: string): Promise<boolean> {
+async function getTeamPostedWorkRecipients(
+  taskId: string,
+  stage: string,
+  requestedRecipientUids: string[],
+): Promise<{ isTeamPosted: boolean; recipientUids: string[] }> {
   const response = await taskServiceClient.getTask(taskId);
   const task: WorkOfferTaskState | undefined = response?.data;
   if (!task || typeof task !== 'object') {
     throw new Error('Task service returned an invalid task response');
   }
-  if (task.isTeamPosted === true || task.postedBy === 'team') return true;
 
   const requesterId = String(
     task.CustomerId || task.customerId || task.requesterId || '',
@@ -106,10 +110,46 @@ async function isTeamPostedWork(taskId: string): Promise<boolean> {
     task.customerPhone ||
     task.requesterPhone ||
     task.customer?.phone;
-  return (
+  const isTeamPosted =
+    task.isTeamPosted === true ||
+    task.postedBy === 'team' ||
     !profile ||
-    isPhoneInExclusionList(customerPhone, settings.excludedPhones)
+    isPhoneInExclusionList(customerPhone, settings.excludedPhones);
+  if (!isTeamPosted) return { isTeamPosted: false, recipientUids: requestedRecipientUids };
+
+  const eligibleStageUids = new Set(
+    (task.dispatchLogs || []).flatMap((area) =>
+      (area.candidates || [])
+        .filter(
+          (candidate) =>
+            candidate.dispatchStage === stage &&
+            candidate.status !== 'ineligible' &&
+            candidate.partnerUid,
+        )
+        .map((candidate) => candidate.partnerUid as string),
+    ),
   );
+  const requestedUids = requestedRecipientUids.filter((uid) => eligibleStageUids.has(uid));
+  if (!requestedUids.length) return { isTeamPosted: true, recipientUids: [] };
+
+  const partnerProfiles = await Profile.find({ uid: { $in: requestedUids } })
+    .select('uid phone mobile phoneNumber')
+    .lean();
+  const teamPartnerUids = new Set(
+    partnerProfiles
+      .filter((partner) =>
+        isPhoneInExclusionList(
+          partner.phone || partner.mobile || partner.phoneNumber,
+          settings.excludedPhones,
+        ),
+      )
+      .map((partner) => String(partner.uid || '').trim())
+      .filter(Boolean),
+  );
+  return {
+    isTeamPosted: true,
+    recipientUids: requestedUids.filter((uid) => teamPartnerUids.has(uid)),
+  };
 }
 
 async function canSendOtherEligibleStage(taskId: string): Promise<boolean> {
@@ -394,10 +434,15 @@ export class WhatsAppNotificationController {
     }
 
     try {
-      if (await isTeamPostedWork(taskId)) {
+      const teamPostedRecipients = await getTeamPostedWorkRecipients(
+        taskId,
+        stage,
+        Array.from(new Set(recipientUids.map((uid: string) => uid.trim()))),
+      );
+      if (teamPostedRecipients.isTeamPosted && !teamPostedRecipients.recipientUids.length) {
         res.status(409).json({
           success: false,
-          error: 'Partner WhatsApp notifications are disabled for team-posted work',
+          error: 'No eligible partner with a phone in Task-Posted Email exclusions is available for this team-posted work',
         });
         return;
       }
@@ -414,7 +459,7 @@ export class WhatsAppNotificationController {
       const data = await dispatchWorkWhatsApp({
         taskId,
         stage,
-        recipientUids: Array.from(new Set(recipientUids.map((uid: string) => uid.trim()))),
+        recipientUids: teamPostedRecipients.recipientUids,
         title: title.trim().slice(0, 500) || 'New work',
         category: category.trim().slice(0, 200) || 'work',
         locationLabel: locationLabel.trim().slice(0, 300),
@@ -486,10 +531,15 @@ export class WhatsAppNotificationController {
       return;
     }
     try {
-      if (await isTeamPostedWork(taskId)) {
+      const teamPostedRecipients = await getTeamPostedWorkRecipients(
+        taskId,
+        stage,
+        [partnerUid.trim()],
+      );
+      if (teamPostedRecipients.isTeamPosted && !teamPostedRecipients.recipientUids.length) {
         res.status(409).json({
           success: false,
-          error: 'Partner WhatsApp notifications are disabled for team-posted work',
+          error: 'This partner is not an eligible team partner for this team-posted work',
         });
         return;
       }
@@ -507,7 +557,7 @@ export class WhatsAppNotificationController {
         {
           taskId,
           stage,
-          recipientUids: [partnerUid.trim()],
+          recipientUids: teamPostedRecipients.recipientUids,
           title: title.trim().slice(0, 500) || 'New work',
           category: category.trim().slice(0, 200) || 'work',
           locationLabel: locationLabel.trim().slice(0, 300),
