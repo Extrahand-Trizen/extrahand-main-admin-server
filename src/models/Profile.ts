@@ -5,6 +5,8 @@ export interface ProfileDocument extends Document {
   name: string;
   email?: string;
   phone?: string;
+  mobile?: string;
+  phoneNumber?: string;
   roles?: string[];
   isAadhaarVerified?: boolean;
   createdAt?: Date;
@@ -25,6 +27,8 @@ const ProfileSchema = new Schema<ProfileDocument>(
     name: { type: String },
     email: { type: String },
     phone: { type: String },
+    mobile: { type: String },
+    phoneNumber: { type: String },
     roles: [{ type: String }],
     isAadhaarVerified: { type: Boolean },
     createdAt: { type: Date },

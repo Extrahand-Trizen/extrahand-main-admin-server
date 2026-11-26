@@ -19,6 +19,11 @@ import {
 } from '../services/WhatsAppCampaignService';
 import { userServiceClient } from '../services/UserServiceClient';
 import { taskServiceClient } from '../services/TaskServiceClient';
+import { Profile } from '../models/Profile';
+import {
+  getTaskPostedEmailSettings,
+  isPhoneInExclusionList,
+} from '../services/TaskPostedEmailSettingsService';
 import type { WhatsAppCampaignApp } from '../models/WhatsAppNotificationCampaign';
 
 const WHATSAPP_APPS: WhatsAppCampaignApp[] = [
@@ -40,6 +45,7 @@ function parsePage(value: unknown, fallback: number, max: number): number | null
 const DISPATCH_STAGES = ['preferred', 'area_rule', 'all'] as const;
 
 type WorkOfferCandidate = {
+  partnerUid?: string;
   dispatchStage?: string;
   status?: string;
   responseStatus?: string;
@@ -47,6 +53,14 @@ type WorkOfferCandidate = {
 
 type WorkOfferTaskState = {
   status?: string;
+  isTeamPosted?: boolean;
+  postedBy?: string;
+  requesterId?: string;
+  customerId?: string;
+  CustomerId?: string;
+  requesterPhone?: string;
+  customerPhone?: string;
+  customer?: { phone?: string };
   assigneeId?: unknown;
   assigneeUid?: unknown;
   partnerId?: unknown;
@@ -65,6 +79,78 @@ type WorkOfferTaskState = {
     expiresAt?: string | Date | null;
   };
 };
+
+async function getTeamPostedWorkRecipients(
+  taskId: string,
+  stage: string,
+  requestedRecipientUids: string[],
+): Promise<{ isTeamPosted: boolean; recipientUids: string[] }> {
+  const response = await taskServiceClient.getTask(taskId);
+  const task: WorkOfferTaskState | undefined = response?.data;
+  if (!task || typeof task !== 'object') {
+    throw new Error('Task service returned an invalid task response');
+  }
+
+  const requesterId = String(
+    task.CustomerId || task.customerId || task.requesterId || '',
+  ).trim();
+  const profileQuery: Record<string, unknown>[] = [];
+  if (requesterId) {
+    profileQuery.push({ uid: requesterId });
+    if (mongoose.Types.ObjectId.isValid(requesterId)) {
+      profileQuery.push({ _id: new mongoose.Types.ObjectId(requesterId) });
+    }
+  }
+  const profile = profileQuery.length
+    ? await Profile.findOne({ $or: profileQuery }).select('phone').lean()
+    : null;
+  const settings = await getTaskPostedEmailSettings();
+  const customerPhone =
+    profile?.phone ||
+    task.customerPhone ||
+    task.requesterPhone ||
+    task.customer?.phone;
+  const isTeamPosted =
+    task.isTeamPosted === true ||
+    task.postedBy === 'team' ||
+    !profile ||
+    isPhoneInExclusionList(customerPhone, settings.excludedPhones);
+  if (!isTeamPosted) return { isTeamPosted: false, recipientUids: requestedRecipientUids };
+
+  const eligibleStageUids = new Set(
+    (task.dispatchLogs || []).flatMap((area) =>
+      (area.candidates || [])
+        .filter(
+          (candidate) =>
+            candidate.dispatchStage === stage &&
+            candidate.status !== 'ineligible' &&
+            candidate.partnerUid,
+        )
+        .map((candidate) => candidate.partnerUid as string),
+    ),
+  );
+  const requestedUids = requestedRecipientUids.filter((uid) => eligibleStageUids.has(uid));
+  if (!requestedUids.length) return { isTeamPosted: true, recipientUids: [] };
+
+  const partnerProfiles = await Profile.find({ uid: { $in: requestedUids } })
+    .select('uid phone mobile phoneNumber')
+    .lean();
+  const teamPartnerUids = new Set(
+    partnerProfiles
+      .filter((partner) =>
+        isPhoneInExclusionList(
+          partner.phone || partner.mobile || partner.phoneNumber,
+          settings.excludedPhones,
+        ),
+      )
+      .map((partner) => String(partner.uid || '').trim())
+      .filter(Boolean),
+  );
+  return {
+    isTeamPosted: true,
+    recipientUids: requestedUids.filter((uid) => teamPartnerUids.has(uid)),
+  };
+}
 
 async function canSendOtherEligibleStage(taskId: string): Promise<boolean> {
   const response = await taskServiceClient.getTask(taskId);
@@ -348,6 +434,18 @@ export class WhatsAppNotificationController {
     }
 
     try {
+      const teamPostedRecipients = await getTeamPostedWorkRecipients(
+        taskId,
+        stage,
+        Array.from(new Set(recipientUids.map((uid: string) => uid.trim()))),
+      );
+      if (teamPostedRecipients.isTeamPosted && !teamPostedRecipients.recipientUids.length) {
+        res.status(409).json({
+          success: false,
+          error: 'No eligible partner with a phone in Task-Posted Email exclusions is available for this team-posted work',
+        });
+        return;
+      }
       if (
         stage === 'all' &&
         !(await canSendOtherEligibleStage(taskId))
@@ -361,7 +459,7 @@ export class WhatsAppNotificationController {
       const data = await dispatchWorkWhatsApp({
         taskId,
         stage,
-        recipientUids: Array.from(new Set(recipientUids.map((uid: string) => uid.trim()))),
+        recipientUids: teamPostedRecipients.recipientUids,
         title: title.trim().slice(0, 500) || 'New work',
         category: category.trim().slice(0, 200) || 'work',
         locationLabel: locationLabel.trim().slice(0, 300),
@@ -433,6 +531,18 @@ export class WhatsAppNotificationController {
       return;
     }
     try {
+      const teamPostedRecipients = await getTeamPostedWorkRecipients(
+        taskId,
+        stage,
+        [partnerUid.trim()],
+      );
+      if (teamPostedRecipients.isTeamPosted && !teamPostedRecipients.recipientUids.length) {
+        res.status(409).json({
+          success: false,
+          error: 'This partner is not an eligible team partner for this team-posted work',
+        });
+        return;
+      }
       if (
         stage === 'all' &&
         !(await canSendOtherEligibleStage(taskId))
@@ -447,7 +557,7 @@ export class WhatsAppNotificationController {
         {
           taskId,
           stage,
-          recipientUids: [partnerUid.trim()],
+          recipientUids: teamPostedRecipients.recipientUids,
           title: title.trim().slice(0, 500) || 'New work',
           category: category.trim().slice(0, 200) || 'work',
           locationLabel: locationLabel.trim().slice(0, 300),

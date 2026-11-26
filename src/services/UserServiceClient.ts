@@ -72,6 +72,7 @@ export class UserServiceClient {
     category?: string;
     city?: string;
     workArea?: string;
+    workAreaIds?: string;
     area?: string;
     isAadhaarVerified?: boolean;
     registrationCompletion?: 'complete' | 'incomplete';

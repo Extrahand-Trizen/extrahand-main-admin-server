@@ -3,23 +3,37 @@ import { AssignmentManagementRules } from '../models/AssignmentManagementRules';
 import { userServiceClient } from '../services/UserServiceClient';
 import { getTaskPostedEmailSettings } from '../services/TaskPostedEmailSettingsService';
 import { getClientSafeStatus } from '../utils/upstreamHttp';
+import { getLocationCatalog } from '../models/LocationCatalog';
+import {
+  filterPreferredPartnerAreaRules,
+  getCityAssignmentAreaNames,
+  LocationCatalogNode,
+  normalizeAssignmentLocation,
+  PreferredPartnerAreaRuleFilterInput,
+} from '../utils/preferredPartnerFilters';
 import logger from '../config/logger';
 
 function normalizePhone(phone: string): string {
   return String(phone || '').replace(/\D/g, '');
 }
 
-function normalizePreferredPartners(partners: any[], includeAttribution: boolean): any[] {
-  return [...partners]
+function normalizePreferredPartners(
+  partners: any[],
+  includeAttribution: boolean,
+  sortByPriority = true,
+): any[] {
+  const normalizedPartners = [...partners]
     .map((partner) => {
       const normalized = typeof partner?.toObject === 'function' ? partner.toObject() : { ...partner };
       if (!includeAttribution) delete normalized.addedBy;
       return normalized;
-    })
-    .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
+    });
+  return sortByPriority
+    ? normalizedPartners.sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0))
+    : normalizedPartners;
 }
 
-function normalizeAreaRule(rule: any, includeAttribution = false) {
+function normalizeAreaRule(rule: any, includeAttribution = false, sortPartnersByPriority = true) {
   return {
     area: String(rule.area || rule._doc?.area || ''),
     category: rule.category || rule._doc?.category || undefined,
@@ -31,6 +45,7 @@ function normalizeAreaRule(rule: any, includeAttribution = false) {
     preferredPartners: normalizePreferredPartners(
       rule.preferredPartners || rule._doc?.preferredPartners || [],
       includeAttribution,
+      sortPartnersByPriority,
     ),
   };
 }
@@ -73,6 +88,69 @@ export class AssignmentManagementController {
     } catch (error: any) {
       logger.error('Get assignment management rules error:', error);
       res.status(getClientSafeStatus(error)).json({ success: false, error: 'Failed to load assignment rules' });
+    }
+  }
+
+  static async getCityPreferredPartners(req: Request, res: Response): Promise<void> {
+    const cityQuery = typeof req.query.city === 'string' ? req.query.city.trim() : '';
+    const workType = typeof req.query.workType === 'string' ? req.query.workType.trim().toLowerCase() : '';
+    const category = typeof req.query.category === 'string' ? req.query.category.trim() : undefined;
+
+    if (!cityQuery) {
+      res.status(400).json({ success: false, error: 'city is required' });
+      return;
+    }
+    if (workType !== 'hourly' && workType !== 'book_now') {
+      res.status(400).json({ success: false, error: 'workType must be hourly or book_now' });
+      return;
+    }
+
+    try {
+      const locationCatalog = await getLocationCatalog();
+      const cities = (locationCatalog?.get('cities') || []) as LocationCatalogNode[];
+      const normalizedCityQuery = normalizeAssignmentLocation(cityQuery);
+      const city = cities.find((item) =>
+        [item.name, item.id].some((value) =>
+          normalizeAssignmentLocation(String(value || '')) === normalizedCityQuery,
+        ),
+      );
+      if (!city) {
+        res.status(404).json({ success: false, error: 'City not found' });
+        return;
+      }
+
+      const rules = await AssignmentManagementRules.findOne({ key: 'assignment_management' }).lean();
+      const matchingRules = filterPreferredPartnerAreaRules(
+        (rules?.areaRules || []) as PreferredPartnerAreaRuleFilterInput[],
+        getCityAssignmentAreaNames(city),
+        workType,
+        category,
+      ).map((rule) => {
+        const normalizedRule = normalizeAreaRule(
+          rule,
+          Boolean(req.admin?.isSuperAdmin),
+          false,
+        );
+        return {
+          ...normalizedRule,
+          preferredPartners: normalizedRule.preferredPartners.map((partner: any) => {
+            const partnerWithoutPriority = { ...partner };
+            delete partnerWithoutPriority.priority;
+            return partnerWithoutPriority;
+          }),
+        };
+      });
+
+      res.json({
+        success: true,
+        data: matchingRules,
+      });
+    } catch (error: any) {
+      logger.error('Get city preferred partners error:', error);
+      res.status(getClientSafeStatus(error)).json({
+        success: false,
+        error: 'Failed to load city preferred partners',
+      });
     }
   }
 

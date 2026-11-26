@@ -110,6 +110,7 @@ export class UserManagementController {
         category: req.query.category as string,
         city: req.query.city as string,
         workArea: req.query.workArea as string,
+        workAreaIds: req.query.workAreaIds as string,
         isAadhaarVerified:
           typeof req.query.isAadhaarVerified === 'string'
             ? req.query.isAadhaarVerified === 'true'
