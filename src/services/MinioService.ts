@@ -1,10 +1,10 @@
 /**
  * MinIO / S3 service for the admin server.
- * Used exclusively to generate short-lived pre-signed GET URLs
- * so that KYC review admins can view Aadhaar photos inline.
+ * Generates short-lived pre-signed GET URLs and supports authorized deletion
+ * so KYC review admins can manage Aadhaar photos.
  *
  * Images are stored in the KYC vault bucket by the user-verification-service.
- * The admin server NEVER writes to the vault — read-only presign only.
+ * The admin server writes to the vault for manual uploads and explicit KYC photo deletion.
  */
 
 import AWS from 'aws-sdk';
@@ -80,6 +80,66 @@ class MinioService {
       .promise();
 
     logger.info('MinioService: file uploaded', { key, bucket: this.bucketName, size: buffer.length });
+  }
+
+  async deleteKycVaultObjectsForUser(userId: string, knownKeys: string[] = []): Promise<number> {
+    if (!this.initialized || !this.s3) {
+      throw new Error('MinioService: storage not configured — cannot delete KYC photos');
+    }
+
+    const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeUserId || safeUserId !== userId) {
+      throw new Error('MinioService: invalid user ID for KYC photo deletion');
+    }
+
+    const prefix = `aadhaar-ocr/${safeUserId}/`;
+    const keys = new Set(knownKeys.filter(Boolean));
+    for (const key of keys) {
+      if (!key.startsWith(prefix)) {
+        throw new Error('MinioService: KYC photo key is outside the user storage prefix');
+      }
+    }
+
+    let continuationToken: string | undefined;
+    do {
+      const response = await this.s3
+        .listObjectsV2({
+          Bucket: this.bucketName,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        })
+        .promise();
+
+      for (const object of response.Contents || []) {
+        if (object.Key) keys.add(object.Key);
+      }
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    const objectKeys = Array.from(keys);
+    for (let offset = 0; offset < objectKeys.length; offset += 1000) {
+      const result = await this.s3
+        .deleteObjects({
+          Bucket: this.bucketName,
+          Delete: {
+            Objects: objectKeys.slice(offset, offset + 1000).map((Key) => ({ Key })),
+            Quiet: true,
+          },
+        })
+        .promise();
+
+      if (result.Errors?.length) {
+        throw new Error(`MinioService: failed to delete ${result.Errors.length} KYC photo object(s)`);
+      }
+    }
+
+    logger.info('MinioService: KYC vault photos deleted', {
+      userId: safeUserId,
+      bucket: this.bucketName,
+      count: objectKeys.length,
+    });
+    return objectKeys.length;
   }
 
   /**

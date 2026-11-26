@@ -1163,6 +1163,85 @@ export class KycReviewController {
     }
   }
 
+  static async delete(req: Request, res: Response): Promise<void> {
+    if (!isAllReviewsRole(req)) {
+      res.status(req.admin ? 403 : 401).json({
+        success: false,
+        error: req.admin ? 'Super admin access required' : 'Authentication required',
+      });
+      return;
+    }
+
+    const userId = String(req.params.userId || '').trim();
+    if (!userId) {
+      res.status(400).json({ success: false, error: 'User ID is required' });
+      return;
+    }
+
+    if (!minioService.isReady) {
+      res.status(503).json({
+        success: false,
+        error: 'Storage service is unavailable. KYC data was not deleted.',
+      });
+      return;
+    }
+
+    try {
+      const [sessions, reviews] = await Promise.all([
+        KycSession.find({ userId, sessionType: 'aadhaar_ocr' })
+          .select('ocr.frontImageKey ocr.backImageKey')
+          .lean(),
+        KycReview.find({ userId }).select('sessionId verificationId').lean(),
+      ]);
+      const imageKeys = sessions.flatMap((session) =>
+        [session.ocr?.frontImageKey, session.ocr?.backImageKey].filter(
+          (key): key is string => Boolean(key),
+        ),
+      );
+
+      const deletedImages = await minioService.deleteKycVaultObjectsForUser(userId, imageKeys);
+      const verificationReset = await userServiceClient.resetAadhaarVerification(userId);
+      const deletedReviews = await KycReview.deleteMany({ userId });
+      const deletedNotifications = await AdminNotification.deleteMany({
+        ...notificationQuery(req),
+        'metadata.userId': userId,
+      });
+
+      invalidateReviewRowsCache();
+      logger.info('KYC review data permanently deleted', {
+        adminUserId: req.admin!.userId,
+        userId,
+        deletedImages,
+        deletedSessions: verificationReset.deletedKycSessions || 0,
+        deletedVerifications: verificationReset.deletedVerifications || 0,
+        deletedReviews: deletedReviews.deletedCount || 0,
+        deletedNotifications: deletedNotifications.deletedCount || 0,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          deletedImages,
+          deletedSessions: verificationReset.deletedKycSessions || 0,
+          deletedVerifications: verificationReset.deletedVerifications || 0,
+          deletedReviews: deletedReviews.deletedCount || 0,
+          deletedNotifications: deletedNotifications.deletedCount || 0,
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('Delete KYC review data error:', {
+        userId,
+        adminUserId: req.admin!.userId,
+        error: message,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to permanently delete KYC review data',
+      });
+    }
+  }
+
   static async accept(req: Request, res: Response): Promise<void> {
     if (!requireKycReviewAccess(req, res)) return;
 

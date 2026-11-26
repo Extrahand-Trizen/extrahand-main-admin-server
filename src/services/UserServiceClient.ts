@@ -238,6 +238,18 @@ export class UserServiceClient {
     );
     return response.data;
   }
+
+  async resetAadhaarVerification(
+    userId: string,
+  ): Promise<{ deletedKycSessions: number; deletedVerifications: number }> {
+    const response = await this.client.delete<{
+      deletedKycSessions: number;
+      deletedVerifications: number;
+    }>(
+      `/api/v1/profiles/internal/${this.encodeUserPathSegment(userId)}/aadhaar-verification`,
+    );
+    return response.data;
+  }
   
   /**
    * Ban user

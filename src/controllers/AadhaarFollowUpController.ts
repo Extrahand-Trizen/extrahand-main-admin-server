@@ -72,6 +72,7 @@ export class AadhaarFollowUpController {
       const profiles = await Profile.find({
          roles: { $in: ['tasker', 'both', 'helper', 'partner'] },
         isAadhaarVerified: false,
+        'dataPrivacy.accountDeleted': { $ne: true },
       })
         .select('uid name email phone createdAt aadhaarKyc isAadhaarVerified partnerProfile.status')
         .sort({ createdAt: -1 })

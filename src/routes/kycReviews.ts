@@ -24,6 +24,7 @@ router.get('/my-claims', KycReviewController.myClaims);
 router.get('/ops-admins', KycReviewController.listOpsAdmins);
 router.get('/:userId/documents', KycReviewController.getDocuments);
 router.get('/:userId/upload-status', KycReviewController.getUploadStatus);
+router.delete('/:userId', KycReviewController.delete);
 router.post('/:userId/claim', KycReviewController.claim);
 router.post('/:userId/unclaim', KycReviewController.unclaim);
 router.post('/:userId/transfer', KycReviewController.transfer);

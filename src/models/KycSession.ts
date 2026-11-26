@@ -1,12 +1,10 @@
 /**
- * Read-only KycSession model for the admin server.
+ * KycSession model for the admin server.
  *
  * The user-verification-service writes KycSession documents to the
  * `extrahand_verifications` MongoDB database (see KYC_VERIFICATION_DB). The admin
- * server only reads `ocr.frontImageKey` and `ocr.backImageKey` from these
- * documents to generate presigned MinIO URLs for the KYC review panel.
- *
- * We intentionally keep this model minimal — admin server never writes to it.
+ * server reads `ocr.frontImageKey` and `ocr.backImageKey` to generate presigned
+ * MinIO URLs, and allows super-admin deletion of a user's Aadhaar OCR sessions.
  */
 
 import mongoose, { Document, Model, Schema } from 'mongoose';

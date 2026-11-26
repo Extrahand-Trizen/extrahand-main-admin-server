@@ -6,6 +6,7 @@ type LocationNode = {
   id: string;
   name: string;
   enabled: boolean;
+  type?: 'town' | 'area';
   deleted?: boolean;
   zones?: LocationNode[];
   areas?: LocationNode[];
@@ -33,6 +34,14 @@ function requireName(value: unknown): string {
     throw error;
   }
   return name;
+}
+
+function requireAreaType(value: unknown): 'town' | 'area' {
+  if (value === undefined) return 'area';
+  if (value === 'town' || value === 'area') return value;
+  const error = new Error('Type must be town or area') as Error & { status?: number };
+  error.status = 400;
+  throw error;
 }
 
 function findNode(nodes: LocationNode[] | undefined, id: string): LocationNode | undefined {
@@ -196,7 +205,7 @@ export class LocationController {
         error.status = 400;
         throw error;
       }
-      areas.push({ id: locationId(areas, name), name, enabled: true, latitude, longitude });
+      areas.push({ id: locationId(areas, name), name, type: requireAreaType(req.body.type), enabled: true, latitude, longitude });
     });
   }
 
@@ -211,6 +220,7 @@ export class LocationController {
         area.name = name;
       }
       if (req.body.enabled !== undefined) area.enabled = Boolean(req.body.enabled);
+      if (req.body.type !== undefined) area.type = requireAreaType(req.body.type);
       for (const key of ['latitude', 'longitude'] as const) {
         if (req.body[key] !== undefined) {
           const value = Number(req.body[key]);
@@ -248,7 +258,7 @@ export class LocationController {
         error.status = 400;
         throw error;
       }
-      areas.push({ id: locationId(areas, name), name, enabled: true, latitude, longitude });
+      areas.push({ id: locationId(areas, name), name, type: requireAreaType(req.body.type), enabled: true, latitude, longitude });
     });
   }
 
@@ -264,6 +274,7 @@ export class LocationController {
         area.name = name;
       }
       if (req.body.enabled !== undefined) area.enabled = Boolean(req.body.enabled);
+      if (req.body.type !== undefined) area.type = requireAreaType(req.body.type);
       for (const key of ['latitude', 'longitude'] as const) {
         if (req.body[key] !== undefined) {
           const value = Number(req.body[key]);
