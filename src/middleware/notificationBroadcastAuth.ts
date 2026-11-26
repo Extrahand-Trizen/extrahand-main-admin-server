@@ -15,7 +15,12 @@ export function notificationBroadcastAuth(
   const providedToken = getNotificationBroadcastAccessToken(
     req.header('authorization'),
   );
-  if (matchesNotificationBroadcastAccessToken(providedToken, env.NOTIFICATION_BROADCAST_ACCESS_TOKEN)) {
+  if (matchesNotificationBroadcastAccessToken(
+    providedToken,
+    env.NOTIFICATION_BROADCAST_ACCESS_TOKEN,
+    env.NOTIFICATION_BROADCAST_ACCESS_TOKEN_TTL,
+    env.NOTIFICATION_BROADCAST_ACCESS_TOKEN_CREATED_AT,
+  )) {
     req.admin = {
       userId: 'notification-broadcast-api',
       email: 'notification-broadcast-api',

@@ -26,7 +26,7 @@ Operations Portal coupon creation, editing, listing, bulk creation, status chang
 
 ### Notification-only access token
 
-Set `NOTIFICATION_BROADCAST_ACCESS_TOKEN` to a randomly generated secret with at least 32 characters. Send it only as `Authorization: Bearer <token>` on `POST /api/v1/notifications/broadcasts`. The token is accepted only on this route; other endpoints still require their existing authentication. Keep the token in a trusted backend or secret manager, never in a browser or mobile app.
+Set `NOTIFICATION_BROADCAST_ACCESS_TOKEN` to a randomly generated secret with at least 32 characters and configure its lifetime with `NOTIFICATION_BROADCAST_ACCESS_TOKEN_TTL`. Use `never` for no expiry or a positive day count such as `30` or `30d`. For a finite TTL, set `NOTIFICATION_BROADCAST_ACCESS_TOKEN_CREATED_AT` once to the token's creation date in `YYYY-MM-DD` format (interpreted as midnight UTC); changing the TTL won't reset that date. The backend rejects the token when its lifetime elapses. Send it only as `Authorization: Bearer <token>` on `POST /api/v1/notifications/broadcasts`; other endpoints still require their existing authentication. Keep the token in a trusted backend or secret manager, never in a browser or mobile app.
 
 Generate a key with:
 
