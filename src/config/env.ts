@@ -55,6 +55,24 @@ const envSchema = z.object({
     z.string().uuid().optional(),
   ),
   SERVICE_AUTH_TOKEN: z.string().min(32),
+  NOTIFICATION_BROADCAST_ACCESS_TOKEN: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(32, 'NOTIFICATION_BROADCAST_ACCESS_TOKEN must be at least 32 characters').optional(),
+  ),
+  NOTIFICATION_BROADCAST_ACCESS_TOKEN_TTL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().regex(/^(never|[1-9]\d*d?)$/, 'Set token TTL to never or a positive number of days').optional(),
+  ),
+  NOTIFICATION_BROADCAST_ACCESS_TOKEN_CREATED_AT: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'NOTIFICATION_BROADCAST_ACCESS_TOKEN_CREATED_AT must use YYYY-MM-DD')
+      .refine((value) => {
+        const date = new Date(`${value}T00:00:00.000Z`);
+        return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+      }, 'NOTIFICATION_BROADCAST_ACCESS_TOKEN_CREATED_AT must be a valid calendar date')
+      .optional(),
+  ),
   GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
   
   // Email Service (for invites)
@@ -73,6 +91,23 @@ const envSchema = z.object({
   MINIO_REGION_NAME: z.string().optional(),
   // KYC vault bucket where Aadhaar images are stored (defaults to 'extrahand-kyc-vault')
   KYC_VAULT_BUCKET_NAME: z.string().optional(),
+}).superRefine((config, context) => {
+  const hasToken = Boolean(config.NOTIFICATION_BROADCAST_ACCESS_TOKEN);
+  const ttl = config.NOTIFICATION_BROADCAST_ACCESS_TOKEN_TTL;
+  const hasCreatedAt = Boolean(config.NOTIFICATION_BROADCAST_ACCESS_TOKEN_CREATED_AT);
+  const validConfiguration = !hasToken
+    ? !ttl && !hasCreatedAt
+    : ttl === 'never'
+      ? !hasCreatedAt
+      : Boolean(ttl && hasCreatedAt);
+
+  if (!validConfiguration) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Set a token, a TTL (never or days), and a creation date for finite TTLs; leave them all unset to disable token auth',
+      path: ['NOTIFICATION_BROADCAST_ACCESS_TOKEN_TTL'],
+    });
+  }
 });
 
 export const env = envSchema.parse(process.env);

@@ -124,6 +124,10 @@ export class PaymentController {
       }
 
       const upstreamParams: Record<string, any> = { ...(req.query as Record<string, any>) };
+      if (search) {
+        upstreamParams.q = search;
+        upstreamParams.taskId = search;
+      }
       if (matchingCustomerUids.size > 0) {
         upstreamParams.customerUids = Array.from(matchingCustomerUids).join(',');
       }
@@ -363,6 +367,10 @@ export class PaymentController {
       }
 
       const upstreamParams: Record<string, any> = { ...(req.query as Record<string, any>) };
+      if (search) {
+        upstreamParams.q = search;
+        upstreamParams.taskId = search;
+      }
       if (matchingUserUids.size > 0) {
         upstreamParams.userUids = Array.from(matchingUserUids).join(',');
       }
