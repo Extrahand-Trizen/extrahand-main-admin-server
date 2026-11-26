@@ -65,60 +65,64 @@ export class AadhaarFollowUpController {
    * Build complete rows from database directly
    */
   private static async buildRows(): Promise<any[]> {
-    let unverifiedHelpers: any[] = [];
+     let unverifiedUsers: any[] = [];
 
-    // Step 1: Query unverified helpers directly from MongoDB (Profiles)
+     // Step 1: Query unverified helpers and partners directly from MongoDB (Profiles)
     try {
       const profiles = await Profile.find({
-        roles: { $in: ['tasker', 'both', 'helper'] },
+         roles: { $in: ['tasker', 'both', 'helper', 'partner'] },
         isAadhaarVerified: false,
       })
-        .select('uid name email phone createdAt aadhaarKyc')
+        .select('uid name email phone createdAt aadhaarKyc isAadhaarVerified partnerProfile.status')
         .sort({ createdAt: -1 })
         .lean();
 
-      unverifiedHelpers = profiles.map((p) => ({
+       unverifiedUsers = profiles.map((p) => ({
         userId: String(p.uid || p._id || '').trim(),
         name: p.name || 'Unknown',
         email: p.email || '',
         phone: p.phone || '',
         createdAt: p.createdAt,
         aadhaarKyc: p.aadhaarKyc,
+        isAadhaarVerified: p.isAadhaarVerified === true,
+        partnerProfileStatus: p.partnerProfile?.status || null,
       }));
     } catch (dbErr: any) {
       logger.warn('AadhaarFollowUpController: direct Profile query failed, falling back to userServiceClient', dbErr);
       // Fallback to user-service if direct DB read encounters an issue
       try {
         const pageSize = 200;
-        const firstResult = await userServiceClient.listUsers({
-          role: 'helper',
-          isAadhaarVerified: false,
-          page: 1,
-          limit: pageSize,
-          sortBy: 'createdAt',
-          sortOrder: 'desc',
-        });
-        const firstUsers = firstResult?.data || firstResult?.users || [];
-        unverifiedHelpers.push(...firstUsers);
+        for (const role of ['helper', 'partner']) {
+          const firstResult = await userServiceClient.listUsers({
+            role,
+            isAadhaarVerified: false,
+            page: 1,
+            limit: pageSize,
+            sortBy: 'createdAt',
+            sortOrder: 'desc',
+          });
+          const firstUsers = firstResult?.data || firstResult?.users || [];
+          if (Array.isArray(firstUsers)) unverifiedUsers.push(...firstUsers);
 
-        const totalPages = firstResult?.pagination?.pages || 1;
-        if (totalPages > 1) {
-          const remainingPageNums = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
-          const remainingResults = await Promise.all(
-            remainingPageNums.map((p) =>
-              userServiceClient.listUsers({
-                role: 'helper',
-                isAadhaarVerified: false,
-                page: p,
-                limit: pageSize,
-                sortBy: 'createdAt',
-                sortOrder: 'desc',
-              }),
-            ),
-          );
-          for (const res of remainingResults) {
-            const users = res?.data || res?.users || [];
-            if (Array.isArray(users)) unverifiedHelpers.push(...users);
+          const totalPages = firstResult?.pagination?.pages || 1;
+          if (totalPages > 1) {
+            const remainingPageNums = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+            const remainingResults = await Promise.all(
+              remainingPageNums.map((p) =>
+                userServiceClient.listUsers({
+                  role,
+                  isAadhaarVerified: false,
+                  page: p,
+                  limit: pageSize,
+                  sortBy: 'createdAt',
+                  sortOrder: 'desc',
+                }),
+              ),
+            );
+            for (const res of remainingResults) {
+              const users = res?.data || res?.users || [];
+              if (Array.isArray(users)) unverifiedUsers.push(...users);
+            }
           }
         }
       } catch (svcErr: any) {
@@ -127,16 +131,16 @@ export class AadhaarFollowUpController {
       }
     }
 
-    const helperIds = unverifiedHelpers
+    const userIds = unverifiedUsers
       .map((u) => String(u.userId || u.uid || u._id || '').trim())
       .filter(Boolean);
 
     // Step 2: Parallel fetch of assignments and review statuses with minimal projection
     const [existingAssignments, reviewDocs] = await Promise.all([
-      AadhaarKycAssignment.find({ userId: { $in: helperIds } })
+      AadhaarKycAssignment.find({ userId: { $in: userIds } })
         .select('userId assignedToUserId assignedToName assignedToEmail')
         .lean(),
-      KycReview.find({ userId: { $in: helperIds } })
+      KycReview.find({ userId: { $in: userIds } })
         .select('userId reviewStatus followUpStatus followUpDate reviewedBy reviewedAt')
         .lean(),
     ]);
@@ -154,7 +158,7 @@ export class AadhaarFollowUpController {
     }
 
     // Step 3: Schedule background round-robin assignments for unassigned helpers (fire-and-forget)
-    const unassignedIds = helperIds.filter((id) => !assignmentMap.has(id));
+    const unassignedIds = userIds.filter((id) => !assignmentMap.has(id));
     if (unassignedIds.length > 0) {
       (async () => {
         const BATCH = 10;
@@ -176,7 +180,7 @@ export class AadhaarFollowUpController {
 
     // Step 4: Map compiled rows
     const rows: any[] = [];
-    for (const user of unverifiedHelpers) {
+    for (const user of unverifiedUsers) {
       const userId = String(user.userId || user.uid || user._id || '').trim();
       if (!userId) continue;
 
@@ -224,7 +228,8 @@ export class AadhaarFollowUpController {
         reviewedAt: review?.reviewedAt || null,
         sessionId: String(user.aadhaarKyc?.verificationId || user.aadhaarKyc?.id || ''),
         verificationId: String(user.aadhaarKyc?.verificationId || ''),
-        isAadhaarVerified: false,
+        isAadhaarVerified: user.isAadhaarVerified === true,
+        partnerProfileStatus: user.partnerProfileStatus || user.partnerProfile?.status || null,
         isManualUpload: false,
         uploadedBy: null,
         uploadedAt: null,
