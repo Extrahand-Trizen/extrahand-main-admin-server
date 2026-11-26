@@ -10,6 +10,9 @@ export interface ProfileDocument extends Document {
   roles?: string[];
   isAadhaarVerified?: boolean;
   createdAt?: Date;
+  partnerProfile?: {
+    status?: string;
+  };
   aadhaarKyc?: {
     visibleStatus?: string;
     internalStatus?: string;

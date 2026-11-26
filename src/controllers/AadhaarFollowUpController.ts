@@ -73,7 +73,7 @@ export class AadhaarFollowUpController {
          roles: { $in: ['tasker', 'both', 'helper', 'partner'] },
         isAadhaarVerified: false,
       })
-        .select('uid name email phone createdAt aadhaarKyc')
+        .select('uid name email phone createdAt aadhaarKyc isAadhaarVerified partnerProfile.status')
         .sort({ createdAt: -1 })
         .lean();
 
@@ -84,6 +84,8 @@ export class AadhaarFollowUpController {
         phone: p.phone || '',
         createdAt: p.createdAt,
         aadhaarKyc: p.aadhaarKyc,
+        isAadhaarVerified: p.isAadhaarVerified === true,
+        partnerProfileStatus: p.partnerProfile?.status || null,
       }));
     } catch (dbErr: any) {
       logger.warn('AadhaarFollowUpController: direct Profile query failed, falling back to userServiceClient', dbErr);
@@ -226,7 +228,8 @@ export class AadhaarFollowUpController {
         reviewedAt: review?.reviewedAt || null,
         sessionId: String(user.aadhaarKyc?.verificationId || user.aadhaarKyc?.id || ''),
         verificationId: String(user.aadhaarKyc?.verificationId || ''),
-        isAadhaarVerified: false,
+        isAadhaarVerified: user.isAadhaarVerified === true,
+        partnerProfileStatus: user.partnerProfileStatus || user.partnerProfile?.status || null,
         isManualUpload: false,
         uploadedBy: null,
         uploadedAt: null,
