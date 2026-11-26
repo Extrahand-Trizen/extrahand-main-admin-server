@@ -55,6 +55,10 @@ const envSchema = z.object({
     z.string().uuid().optional(),
   ),
   SERVICE_AUTH_TOKEN: z.string().min(32),
+  NOTIFICATION_BROADCAST_ACCESS_TOKEN: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(32, 'NOTIFICATION_BROADCAST_ACCESS_TOKEN must be at least 32 characters').optional(),
+  ),
   GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
   
   // Email Service (for invites)

@@ -24,6 +24,16 @@ This service acts as:
 See `.env.example` for required environment variables.
 Operations Portal coupon creation, editing, listing, bulk creation, status changes, and deletion are handled directly by this service against the shared `coupons` collection. Set `MONGO_DB` to the same database used by coupon-service (`MONGODB_DB`) so the mobile coupon-validation service sees the portal's changes. Catalog tabs continue to use the task-service catalog API through the main admin server.
 
+### Notification-only access token
+
+Set `NOTIFICATION_BROADCAST_ACCESS_TOKEN` to a randomly generated secret with at least 32 characters. Send it only as `Authorization: Bearer <token>` on `POST /api/v1/notifications/broadcasts`. The token is accepted only on this route; other endpoints still require their existing authentication. Keep the token in a trusted backend or secret manager, never in a browser or mobile app.
+
+Generate a key with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
 ## Installation
 
 ```bash

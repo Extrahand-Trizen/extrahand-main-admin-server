@@ -4,6 +4,7 @@ import { NotificationController } from '../controllers/NotificationController';
 import { AppNotificationController } from '../controllers/AppNotificationController';
 import { WhatsAppNotificationController } from '../controllers/WhatsAppNotificationController';
 import { verifyAuth, requireOperationsAdminOrSuperAdmin, requirePermission } from '../middleware/auth';
+import { notificationBroadcastAuth } from '../middleware/notificationBroadcastAuth';
 import { Action, Resource } from '../types/permissions';
 import { serviceAuthMiddleware } from '../middleware/serviceAuth';
 
@@ -30,7 +31,7 @@ router.get('/whatsapp/campaigns', verifyAuth, requireOperationsAdminOrSuperAdmin
 router.get('/whatsapp/campaigns/:campaignId/recipients', verifyAuth, requireOperationsAdminOrSuperAdmin, WhatsAppNotificationController.getCampaignRecipients);
 
 router.get('/broadcasts', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.listBroadcasts);
-router.post('/broadcasts', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.sendBroadcast);
+router.post('/broadcasts', notificationBroadcastAuth, AppNotificationController.sendBroadcast);
 router.post('/broadcasts/clear', verifyAuth, requireOperationsAdminOrSuperAdmin, AppNotificationController.clearBroadcasts);
 router.post(
   '/broadcasts/image',
