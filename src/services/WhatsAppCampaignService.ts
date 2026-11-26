@@ -35,7 +35,7 @@ type AudienceInput = {
   workAreas: string[];
 };
 
-export type DialogTemplate = {
+type DialogTemplate = {
   id: string;
   organizationId: string;
   metaTemplateName: string;
@@ -138,7 +138,7 @@ function collectTemplateVariableIndexes(value: unknown, found = new Set<number>(
   return [...found].sort((first, second) => first - second);
 }
 
-export function templateVariableIndexes(template: DialogTemplate): number[] {
+function templateVariableIndexes(template: DialogTemplate): number[] {
   const schema = template.currentVersionDetail?.variableSchema;
   let schemaIndexes: number[] = [];
   if (schema && typeof schema === 'object' && 'variables' in schema) {
