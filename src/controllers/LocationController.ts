@@ -6,6 +6,7 @@ type LocationNode = {
   id: string;
   name: string;
   enabled: boolean;
+  deleted?: boolean;
   zones?: LocationNode[];
   areas?: LocationNode[];
   latitude?: number;
@@ -39,7 +40,7 @@ function findNode(nodes: LocationNode[] | undefined, id: string): LocationNode |
 }
 
 function ensureUniqueName(nodes: LocationNode[], name: string, currentId?: string): void {
-  if (nodes.some((node) => node.id !== currentId && node.name.toLowerCase() === name.toLowerCase())) {
+  if (nodes.some((node) => !node.deleted && node.id !== currentId && node.name.toLowerCase() === name.toLowerCase())) {
     const error = new Error('A location with this name already exists at this level') as Error & { status?: number };
     error.status = 409;
     throw error;
@@ -66,15 +67,15 @@ function locationId(nodes: LocationNode[], name: string): string {
 
 function activeCatalog(cities: LocationNode[]): LocationNode[] {
   return cities
-    .filter((city) => city.enabled !== false)
+    .filter((city) => city.enabled !== false && !city.deleted)
     .map((city) => ({
       ...city,
-      areas: (city.areas || []).filter((area) => area.enabled !== false),
+      areas: (city.areas || []).filter((area) => area.enabled !== false && !area.deleted),
       zones: city.areas?.length ? [] : (city.zones || [])
-        .filter((zone) => zone.enabled !== false)
+        .filter((zone) => zone.enabled !== false && !zone.deleted)
         .map((zone) => ({
           ...zone,
-          areas: (zone.areas || []).filter((area) => area.enabled !== false),
+          areas: (zone.areas || []).filter((area) => area.enabled !== false && !area.deleted),
         })),
     }));
 }
@@ -144,9 +145,9 @@ export class LocationController {
 
   static deleteCity(req: Request, res: Response): Promise<void> {
     return saveMutation(req, res, (cities) => {
-      ensureNode(cities, req.params.cityId, 'City');
-      const index = cities.findIndex((city) => city.id === req.params.cityId);
-      cities.splice(index, 1);
+      const city = ensureNode(cities, req.params.cityId, 'City');
+      city.enabled = false;
+      city.deleted = true;
     });
   }
 
@@ -176,8 +177,9 @@ export class LocationController {
   static deleteZone(req: Request, res: Response): Promise<void> {
     return saveMutation(req, res, (cities) => {
       const city = ensureNode(cities, req.params.cityId, 'City');
-      ensureNode(city.zones, req.params.zoneId, 'Zone');
-      city.zones = (city.zones || []).filter((zone) => zone.id !== req.params.zoneId);
+      const zone = ensureNode(city.zones, req.params.zoneId, 'Zone');
+      zone.enabled = false;
+      zone.deleted = true;
     });
   }
 
@@ -226,8 +228,9 @@ export class LocationController {
   static deleteCityArea(req: Request, res: Response): Promise<void> {
     return saveMutation(req, res, (cities) => {
       const city = ensureNode(cities, req.params.cityId, 'City');
-      ensureNode(city.areas, req.params.areaId, 'Area');
-      city.areas = (city.areas || []).filter((area) => area.id !== req.params.areaId);
+      const area = ensureNode(city.areas, req.params.areaId, 'Area');
+      area.enabled = false;
+      area.deleted = true;
     });
   }
 
@@ -279,8 +282,9 @@ export class LocationController {
     return saveMutation(req, res, (cities) => {
       const city = ensureNode(cities, req.params.cityId, 'City');
       const zone = ensureNode(city.zones, req.params.zoneId, 'Zone');
-      ensureNode(zone.areas, req.params.areaId, 'Area');
-      zone.areas = (zone.areas || []).filter((area) => area.id !== req.params.areaId);
+      const area = ensureNode(zone.areas, req.params.areaId, 'Area');
+      area.enabled = false;
+      area.deleted = true;
     });
   }
 }
