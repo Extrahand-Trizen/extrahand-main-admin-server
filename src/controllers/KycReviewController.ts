@@ -12,6 +12,7 @@ import { minioService } from '../services/MinioService';
 import { createAadhaarKycAdminNotification } from '../services/AadhaarKycNotificationService';
 import { listAllAadhaarKycAdmins } from '../services/AadhaarKycRecipientService';
 import { AadhaarFollowUpController } from './AadhaarFollowUpController';
+import { shouldShowKycReviewRow } from '../utils/kycReviewVisibility';
 
 const AADHAAR_NOTIFICATION_TYPES = [
   'aadhaar_verification_failed',
@@ -1076,6 +1077,8 @@ export class KycReviewController {
       const limit = Math.max(1, parseInt(String(req.query.limit || '20')));
 
       let rows = await getReviewRows();
+
+      rows = rows.filter((row) => shouldShowKycReviewRow(row, reviewStatus));
 
       // Filter: operations admin only sees unclaimed reviews
       if (!req.admin?.isSuperAdmin) {
