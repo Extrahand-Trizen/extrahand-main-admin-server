@@ -1,9 +1,15 @@
 import { Router } from 'express';
 import { UserManagementController } from '../controllers/UserManagementController';
-import { verifyAuth, requirePermission } from '../middleware/auth';
+import {
+  verifyAuth,
+  requireOperationsAdminOrSuperAdmin,
+  requirePermission,
+} from '../middleware/auth';
 import { Resource, Action } from '../types/permissions';
 import { PartnerCategoryRequestController } from '../controllers/PartnerCategoryRequestController';
 import { CustomerActivityController } from '../controllers/CustomerActivityController';
+import { PartnerCategoryCatalogController } from '../controllers/PartnerCategoryCatalogController';
+import { auditMiddleware } from '../middleware/audit';
 
 const router = Router();
 
@@ -19,6 +25,34 @@ router.patch(
   '/partner-category-requests/:requestId',
   requirePermission(`${Resource.USER}.${Action.UPDATE}`),
   PartnerCategoryRequestController.review
+);
+router.get(
+  '/partner-categories',
+  PartnerCategoryCatalogController.list,
+);
+router.post(
+  '/partner-categories',
+  requireOperationsAdminOrSuperAdmin,
+  auditMiddleware('partner_category.created', 'partner_category', (req) =>
+    String(req.body?.id || 'new'),
+  ),
+  PartnerCategoryCatalogController.create,
+);
+router.put(
+  '/partner-categories/:categoryId',
+  requireOperationsAdminOrSuperAdmin,
+  auditMiddleware('partner_category.updated', 'partner_category', (req) =>
+    String(req.params.categoryId),
+  ),
+  PartnerCategoryCatalogController.update,
+);
+router.patch(
+  '/partner-categories/:categoryId/status',
+  requireOperationsAdminOrSuperAdmin,
+  auditMiddleware('partner_category.status_updated', 'partner_category', (req) =>
+    String(req.params.categoryId),
+  ),
+  PartnerCategoryCatalogController.setActive,
 );
 
 router.get(

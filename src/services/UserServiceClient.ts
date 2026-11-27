@@ -133,6 +133,34 @@ export class UserServiceClient {
     return response.data;
   }
 
+  async listPartnerCategories(includeInactive = true): Promise<any> {
+    const response = await this.client.get('/api/v1/users/partner-categories', {
+      params: { includeInactive },
+    });
+    return response.data;
+  }
+
+  async createPartnerCategory(body: Record<string, unknown>): Promise<any> {
+    const response = await this.client.post('/api/v1/users/partner-categories', body);
+    return response.data;
+  }
+
+  async updatePartnerCategory(categoryId: string, body: Record<string, unknown>): Promise<any> {
+    const response = await this.client.put(
+      `/api/v1/users/partner-categories/${encodeURIComponent(categoryId)}`,
+      body,
+    );
+    return response.data;
+  }
+
+  async setPartnerCategoryActive(categoryId: string, isActive: boolean): Promise<any> {
+    const response = await this.client.patch(
+      `/api/v1/users/partner-categories/${encodeURIComponent(categoryId)}/status`,
+      { isActive },
+    );
+    return response.data;
+  }
+
   async reviewPartnerCategoryRequest(
     requestId: string,
     body: { status: 'approved' | 'rejected'; reviewNotes?: string },
